@@ -39,4 +39,4 @@ FROM query_performance
 ORDER BY execution_time_ms DESC
 LIMIT 10;
 
-
+DROP INDEX IF EXISTS idx_orders_customer_id;

@@ -41,21 +41,24 @@ def recommend_index(query, parameters):
         plan
     )
 
-    # Detect equality filters
+    # Detect equality filters such as:
+    # Filter: (customer_id = 5000)
     filter_match = re.search(
-        r"Filter: \(\((\w+) =",
+        r"Filter:\s*\((\w+)\s*=",
         plan
     )
 
     if sequential_scan and filter_match:
-
         table = sequential_scan.group(1)
         column = filter_match.group(1)
 
         print("Potential optimization detected.")
         print(f"Table: {table}")
         print(f"Column: {column}")
-        print(f"Recommendation: Create an index on {table}({column}).")
+        print(
+            f"Recommendation: Create an index on "
+            f"{table}({column})."
+        )
 
     else:
         print("No automatic index recommendation generated.")
