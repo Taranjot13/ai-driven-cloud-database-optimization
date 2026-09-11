@@ -2,6 +2,7 @@ import re
 import time
 import psycopg2
 
+
 DB_CONFIG = {
     "host": "localhost",
     "port": 5432,
@@ -10,7 +11,10 @@ DB_CONFIG = {
     "password": "123456t"
 }
 
+
 IMPROVEMENT_THRESHOLD = 5.0
+MEASUREMENT_RUNS = 7
+MAX_VARIATION_PERCENT = 25.0
 
 
 def get_connection():
@@ -66,15 +70,24 @@ def index_exists(connection, index_name):
     cursor = connection.cursor()
 
     try:
-        cursor.execute(query, (index_name,))
+        cursor.execute(
+            query,
+            (index_name,)
+        )
+
         exists = cursor.fetchone()[0]
+
         return exists
 
     finally:
         cursor.close()
 
 
-def create_index(connection, table_name, column_name):
+def create_index(
+    connection,
+    table_name,
+    column_name
+):
     if not validate_identifier(table_name):
         raise ValueError(
             f"Unsafe table name: {table_name}"
@@ -127,7 +140,10 @@ def create_index(connection, table_name, column_name):
     return index_name, True
 
 
-def drop_index(connection, index_name):
+def drop_index(
+    connection,
+    index_name
+):
     if not validate_identifier(index_name):
         raise ValueError(
             f"Unsafe index name: {index_name}"
@@ -151,7 +167,10 @@ def drop_index(connection, index_name):
     )
 
 
-def execute_query(connection, query_text):
+def execute_query(
+    connection,
+    query_text
+):
     cursor = connection.cursor()
 
     try:
@@ -172,7 +191,11 @@ def execute_query(connection, query_text):
         cursor.close()
 
 
-def measure_query(connection, query_text, runs=5):
+def measure_query(
+    connection,
+    query_text,
+    runs=MEASUREMENT_RUNS
+):
     timings = []
 
     for _ in range(runs):
@@ -181,7 +204,9 @@ def measure_query(connection, query_text, runs=5):
             query_text
         )
 
-        timings.append(execution_time)
+        timings.append(
+            execution_time
+        )
 
     timings.sort()
 
@@ -195,10 +220,31 @@ def measure_query(connection, query_text, runs=5):
     else:
         median_time = timings[middle]
 
-    return median_time
+    minimum_time = min(timings)
+    maximum_time = max(timings)
+
+    if median_time > 0:
+        variation_percent = (
+            (maximum_time - minimum_time)
+            / median_time
+        ) * 100
+    else:
+        variation_percent = 0.0
+
+    return {
+        "timings": timings,
+        "median": median_time,
+        "minimum": minimum_time,
+        "maximum": maximum_time,
+        "variation_percent":
+            variation_percent
+    }
 
 
-def calculate_improvement(baseline, optimized):
+def calculate_improvement(
+    baseline,
+    optimized
+):
     if baseline <= 0:
         return 0.0
 
@@ -208,6 +254,57 @@ def calculate_improvement(baseline, optimized):
     ) * 100
 
     return improvement
+
+
+def is_measurement_stable(
+    measurement
+):
+    return (
+        measurement["variation_percent"]
+        <= MAX_VARIATION_PERCENT
+    )
+
+
+def print_measurement(
+    label,
+    measurement
+):
+    print(
+        f"\n{label}"
+    )
+
+    print(
+        "Individual timings: "
+        + ", ".join(
+            f"{value:.3f} ms"
+            for value in measurement["timings"]
+        )
+    )
+
+    print(
+        f"Median: "
+        f"{measurement['median']:.3f} ms"
+    )
+
+    print(
+        f"Minimum: "
+        f"{measurement['minimum']:.3f} ms"
+    )
+
+    print(
+        f"Maximum: "
+        f"{measurement['maximum']:.3f} ms"
+    )
+
+    print(
+        f"Variation: "
+        f"{measurement['variation_percent']:.2f}%"
+    )
+
+    print(
+        f"Measurement stability: "
+        f"{'STABLE' if is_measurement_stable(measurement) else 'UNSTABLE'}"
+    )
 
 
 def save_history(
@@ -271,13 +368,17 @@ def save_history(
     )
 
 
-def verify_rollback(connection, index_name):
+def verify_rollback(
+    connection,
+    index_name
+):
     exists = index_exists(
         connection,
         index_name
     )
 
     if exists:
+
         print(
             "ROLLBACK VERIFICATION FAILED: "
             f"{index_name} still exists."
@@ -303,19 +404,43 @@ def optimize_query(
         "\n===== AUTONOMOUS OPTIMIZATION =====\n"
     )
 
-    print(f"Metric ID: {metric_id}")
-    print(f"Target table: {table_name}")
-    print(f"Target column: {column_name}")
-    print(f"Query: {query_text}")
+    print(
+        f"Metric ID: {metric_id}"
+    )
 
-    # ---------------------------------------------------------
+    print(
+        f"Target table: {table_name}"
+    )
+
+    print(
+        f"Target column: {column_name}"
+    )
+
+    print(
+        f"Query: {query_text}"
+    )
+
+    print(
+        f"\nMeasurement runs per phase: "
+        f"{MEASUREMENT_RUNS}"
+    )
+
+    print(
+        f"Maximum allowed timing variation: "
+        f"{MAX_VARIATION_PERCENT:.1f}%"
+    )
+
     # SAFETY VALIDATION
-    # ---------------------------------------------------------
 
     if not validate_identifier(table_name):
-        print("\nOptimization cancelled.")
+
         print(
-            f"Unsafe table identifier: {table_name}"
+            "\nOptimization cancelled."
+        )
+
+        print(
+            f"Unsafe table identifier: "
+            f"{table_name}"
         )
 
         return {
@@ -329,9 +454,14 @@ def optimize_query(
         }
 
     if not validate_identifier(column_name):
-        print("\nOptimization cancelled.")
+
         print(
-            f"Unsafe column identifier: {column_name}"
+            "\nOptimization cancelled."
+        )
+
+        print(
+            f"Unsafe column identifier: "
+            f"{column_name}"
         )
 
         return {
@@ -348,37 +478,37 @@ def optimize_query(
 
     try:
 
-        # -----------------------------------------------------
-        # STEP 1 — BASELINE MEASUREMENT
-        # -----------------------------------------------------
+        # BASELINE MEASUREMENT
 
         print(
-            "\nMeasuring baseline performance..."
+            "\n===== BASELINE MEASUREMENT ====="
         )
 
-        baseline_time = measure_query(
+        baseline_measurement = measure_query(
             connection,
             query_text
         )
 
-        print(
-            "Baseline execution time: "
-            f"{baseline_time:.3f} ms"
+        print_measurement(
+            "Baseline performance:",
+            baseline_measurement
         )
 
-        # -----------------------------------------------------
-        # STEP 2 — INDEX CREATION / DETECTION
-        # -----------------------------------------------------
-
-        index_name, created_by_optimizer = create_index(
-            connection,
-            table_name,
-            column_name
+        baseline_time = (
+            baseline_measurement["median"]
         )
 
-        # -----------------------------------------------------
-        # STEP 3 — EXISTING INDEX PATH
-        # -----------------------------------------------------
+        # INDEX CREATION / DETECTION
+
+        index_name, created_by_optimizer = (
+            create_index(
+                connection,
+                table_name,
+                column_name
+            )
+        )
+
+        # EXISTING INDEX PATH
 
         if not created_by_optimizer:
 
@@ -391,18 +521,26 @@ def optimize_query(
                 "or remove the existing index."
             )
 
-            print(
-                "\nMeasuring current indexed performance..."
-            )
-
-            optimized_time = measure_query(
-                connection,
-                query_text
-            )
+            # CURRENT INDEXED MEASUREMENT
 
             print(
-                "Indexed execution time: "
-                f"{optimized_time:.3f} ms"
+                "\n===== INDEXED MEASUREMENT ====="
+            )
+
+            optimized_measurement = (
+                measure_query(
+                    connection,
+                    query_text
+                )
+            )
+
+            print_measurement(
+                "Indexed performance:",
+                optimized_measurement
+            )
+
+            optimized_time = (
+                optimized_measurement["median"]
             )
 
             improvement = calculate_improvement(
@@ -410,13 +548,41 @@ def optimize_query(
                 optimized_time
             )
 
+            baseline_stable = (
+                is_measurement_stable(
+                    baseline_measurement
+                )
+            )
+
+            optimized_stable = (
+                is_measurement_stable(
+                    optimized_measurement
+                )
+            )
+
             print(
-                "Observed improvement: "
+                f"\nObserved median improvement: "
                 f"{improvement:.2f}%"
             )
 
-            # Existing indexes are NEVER removed.
-            if improvement >= IMPROVEMENT_THRESHOLD:
+            print(
+                f"Baseline stable: "
+                f"{'YES' if baseline_stable else 'NO'}"
+            )
+
+            print(
+                f"Indexed measurement stable: "
+                f"{'YES' if optimized_stable else 'NO'}"
+            )
+
+            # EXISTING INDEXES ARE NEVER REMOVED
+
+            if (
+                baseline_stable
+                and optimized_stable
+                and improvement
+                >= IMPROVEMENT_THRESHOLD
+            ):
 
                 decision = (
                     "EXISTING INDEX VERIFIED"
@@ -430,14 +596,17 @@ def optimize_query(
                 print(
                     f"Index {index_name} "
                     "provides sufficient "
-                    "observed improvement."
+                    "stable improvement."
                 )
 
                 print(
                     "Existing index preserved."
                 )
 
-            else:
+            elif (
+                baseline_stable
+                and optimized_stable
+            ):
 
                 decision = (
                     "EXISTING INDEX NOT VERIFIED"
@@ -449,14 +618,40 @@ def optimize_query(
                 )
 
                 print(
-                    f"Index {index_name} did not "
-                    "demonstrate sufficient "
-                    "observed improvement."
+                    "The measurements were stable, "
+                    "but the index did not demonstrate "
+                    "sufficient improvement."
                 )
 
                 print(
-                    "Existing index will "
-                    "still be preserved."
+                    "Existing index will still "
+                    "be preserved."
+                )
+
+                print(
+                    "No destructive action will "
+                    "be performed."
+                )
+
+            else:
+
+                decision = (
+                    "MEASUREMENT UNSTABLE"
+                )
+
+                print(
+                    "\nDecision: "
+                    "MEASUREMENT UNSTABLE"
+                )
+
+                print(
+                    "Performance measurements "
+                    "were too variable for a "
+                    "confident optimization conclusion."
+                )
+
+                print(
+                    "Existing index will be preserved."
                 )
 
                 print(
@@ -480,51 +675,96 @@ def optimize_query(
                 "metric_id": metric_id,
                 "table": table_name,
                 "column": column_name,
-                "baseline_time_ms": baseline_time,
-                "optimized_time_ms": optimized_time,
-                "improvement_percent": improvement,
+                "baseline_time_ms":
+                    baseline_time,
+                "optimized_time_ms":
+                    optimized_time,
+                "improvement_percent":
+                    improvement,
                 "decision": decision
             }
 
-        # -----------------------------------------------------
-        # STEP 4 — NEW INDEX PATH
-        # -----------------------------------------------------
+        # NEW INDEX PATH
 
         time.sleep(0.5)
 
         print(
-            "\nMeasuring optimized performance..."
+            "\n===== OPTIMIZED MEASUREMENT ====="
         )
 
-        optimized_time = measure_query(
+        optimized_measurement = measure_query(
             connection,
             query_text
         )
 
-        print(
-            "Optimized execution time: "
-            f"{optimized_time:.3f} ms"
+        print_measurement(
+            "Optimized performance:",
+            optimized_measurement
         )
 
-        # -----------------------------------------------------
-        # STEP 5 — PERFORMANCE COMPARISON
-        # -----------------------------------------------------
+        optimized_time = (
+            optimized_measurement["median"]
+        )
+
+        # PERFORMANCE COMPARISON
 
         improvement = calculate_improvement(
             baseline_time,
             optimized_time
         )
 
+        baseline_stable = (
+            is_measurement_stable(
+                baseline_measurement
+            )
+        )
+
+        optimized_stable = (
+            is_measurement_stable(
+                optimized_measurement
+            )
+        )
+
         print(
-            "Performance improvement: "
+            f"\nMedian performance improvement: "
             f"{improvement:.2f}%"
         )
 
-        # -----------------------------------------------------
-        # STEP 6 — AUTONOMOUS DECISION
-        # -----------------------------------------------------
+        # AUTONOMOUS DECISION
 
-        if improvement >= IMPROVEMENT_THRESHOLD:
+        if not baseline_stable:
+
+            decision = (
+                "ROLLBACK_UNSTABLE_BASELINE"
+            )
+
+            print(
+                "\nDecision: "
+                "ROLLBACK_UNSTABLE_BASELINE"
+            )
+
+            print(
+                "Baseline measurements were "
+                "too variable."
+            )
+
+        elif not optimized_stable:
+
+            decision = (
+                "ROLLBACK_UNSTABLE_OPTIMIZED"
+            )
+
+            print(
+                "\nDecision: "
+                "ROLLBACK_UNSTABLE_OPTIMIZED"
+            )
+
+            print(
+                "Optimized measurements were "
+                "too variable."
+            )
+
+        elif improvement >= IMPROVEMENT_THRESHOLD:
 
             decision = "KEEP INDEX"
 
@@ -534,7 +774,8 @@ def optimize_query(
 
             print(
                 f"Index {index_name} "
-                "provides sufficient improvement."
+                "provides sufficient stable "
+                "improvement."
             )
 
             print(
@@ -552,8 +793,12 @@ def optimize_query(
             print(
                 f"Index {index_name} "
                 "did not provide sufficient "
-                "improvement."
+                "stable improvement."
             )
+
+        # ROLLBACK WHEN REQUIRED
+
+        if decision != "KEEP INDEX":
 
             print(
                 "\nRolling back candidate index..."
@@ -564,9 +809,11 @@ def optimize_query(
                 index_name
             )
 
-            rollback_success = verify_rollback(
-                connection,
-                index_name
+            rollback_success = (
+                verify_rollback(
+                    connection,
+                    index_name
+                )
             )
 
             if rollback_success:
@@ -582,9 +829,7 @@ def optimize_query(
                     "be fully verified."
                 )
 
-        # -----------------------------------------------------
-        # STEP 7 — SAVE LEARNING HISTORY
-        # -----------------------------------------------------
+        # SAVE HISTORY
 
         save_history(
             connection,
@@ -602,9 +847,12 @@ def optimize_query(
             "metric_id": metric_id,
             "table": table_name,
             "column": column_name,
-            "baseline_time_ms": baseline_time,
-            "optimized_time_ms": optimized_time,
-            "improvement_percent": improvement,
+            "baseline_time_ms":
+                baseline_time,
+            "optimized_time_ms":
+                optimized_time,
+            "improvement_percent":
+                improvement,
             "decision": decision
         }
 
@@ -638,6 +886,7 @@ def optimize_query(
 
 
 def main():
+
     print(
         "Autonomous optimizer module loaded."
     )
