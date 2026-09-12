@@ -112,104 +112,90 @@ The system will be evaluated using quantitative performance and efficiency metri
 
 * Query latency
 * P95/P99 latency
-* Query throughput
-* CPU utilization
-* Memory utilization
-* Database resource utilization
-* Infrastructure cost
-* SLA violations
-* Optimization success rate
-* Performance improvement after optimization
-* Rollback rate
-* Prediction accuracy
+# AI-Driven Cloud Database Optimization
 
-## 🔬 Research Direction
+A Python and PostgreSQL prototype that measures query performance, detects anomalous workload behavior, predicts the next execution time, and selects database index optimizations through an autonomous decision loop.
 
-The project investigates whether intelligent and autonomous optimization techniques can dynamically balance **database performance, infrastructure cost, and resource efficiency** while maintaining predefined performance and safety constraints.
-
-The research focuses on determining whether machine learning and autonomous decision-making can improve database optimization compared with traditional rule-based or manually managed optimization approaches.
-
-## 📌 Project Status
-
-**Phase: Core Development**
-
-### ✅ Completed
-
-* PostgreSQL database implementation
-* Synthetic database workload generation
-* Database performance monitoring
-* Query performance metric collection
-* SQL query performance analysis
-* Slow-query detection
-* Index recommendation and optimization workflow
-* Index performance validation
-* Safe optimization with performance verification
-* ML-based anomaly detection using Isolation Forest
-
-### 🚧 In Progress
-
-* Workload prediction
-* Advanced anomaly detection
-* Autonomous decision engine
-* Agent-based optimization workflow
-* Optimization rollback
-* Resource optimization
-* Cost optimization
-* FastAPI backend
-* Monitoring dashboard
-* Automated testing
-* Containerized deployment
-
-### 🔮 Future Enhancements
-
-* Continuous learning from optimization outcomes
-* Advanced workload forecasting
-* Multi-database support
-* Advanced cloud resource optimization
-* Reinforcement-learning-based optimization
-* More sophisticated autonomous decision-making
-* Production-scale deployment
-
-## 📁 Project Structure
+## Project Structure
 
 ```text
 ai-driven-cloud-database-optimization/
-│
-├── database/
-│   ├── schema/
-│   └── queries/
-│
-├── scripts/
-│   ├── generate_data.py
-│   ├── monitor_database.py
-│   ├── workload_generator.py
-│   ├── detect_slow_queries.py
-│   ├── optimization_recommender.py
-│   ├── analyze_query.py
-│   ├── index_recommender.py
-│   ├── validate_index.py
-│   ├── safe_optimizer.py
-│   └── anomaly_detection.py
-│
-├── src/
-│   ├── config/
-│   ├── database/
-│   ├── monitoring/
-│   └── ml/
-│
-├── tests/
-│
-├── docs/
-│
-├── requirements.txt
-├── README.md
-├── LICENSE
-└── .gitignore
+├── database/                         Database assets (currently empty)
+├── docs/                             Project documentation (currently empty)
+├── psql queries/                     Example SQL workloads
+│   ├── q1.sql
+│   ├── q2.sql
+│   ├── q3.sql
+│   ├── q4.sql
+│   ├── q5.sql
+│   └── q6.sql
+├── scripts/                          Database analysis and optimization tools
+│   ├── analyze_query.py              Analyze SQL query performance
+│   ├── anomaly_detection.py          Detect anomalous metrics
+│   ├── autonomous_optimizer.py       Apply and verify index changes
+│   ├── composite_index_optimizer.py  Optimize filter/order index combinations
+│   ├── decision_engine.py            Select the next optimization action
+│   ├── detect_slow_queries.py        Find slow query executions
+│   ├── generate_data.py              Generate sample database data
+│   ├── index_recommender.py          Recommend single-column indexes
+│   ├── learning_engine.py            Read optimization history and risk signals
+│   ├── monitor_database.py            Execute and record query metrics
+│   ├── optimization_recommender.py   Generate optimization recommendations
+│   ├── query_plan_analyzer.py        Inspect PostgreSQL query plans
+│   ├── safe_optimizer.py             Run guarded optimization actions
+│   ├── validate_index.py             Validate index performance
+│   ├── workload_generator.py         Generate database workloads
+│   └── workload_prediction.py        Predict the next execution time
+├── src/                              Application packages
+│   ├── config/                       Configuration package
+│   ├── database/                     Database integration package
+│   ├── ml/                           Machine learning package
+│   ├── monitoring/                   Monitoring package
+│   └── main.py                       End-to-end orchestration entry point
+├── tests/                            Automated tests (currently empty)
+├── requirements.txt                  Python dependencies
+├── README.md                         Project documentation
+└── LICENSE                           Project license
 ```
 
-## 👨‍💻 Author
+## Current workflow
 
-**Taranjot Singh**
+**Monitor -> Analyze -> Predict -> Decide -> Optimize -> Verify -> Learn**
 
-BE Computer Science & Engineering
-Chitkara University Institute of Engineering & Technology
+## Requirements
+
+- Python 3.10 or later
+- PostgreSQL 13 or later
+- A PostgreSQL database named `cloud_optimizer`
+- Tables named `query_performance` and `optimization_history`
+
+The application currently reads PostgreSQL connection settings from the `DB_CONFIG` dictionaries in the database-related scripts. Update those values for your local database before running the system. Do not commit real credentials to the repository.
+
+## Installation
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install pandas psycopg2-binary scikit-learn SQLAlchemy
+```
+
+## Run the optimizer
+
+```powershell
+python -m src.main
+```
+
+The autonomous optimization stages require at least 10 rows in `query_performance`.
+
+## Safety notes
+
+Run the optimizer against a development or staging database first. Review generated index changes and use a database user with only the permissions required for testing. The optimizer can execute schema changes when the decision engine selects an optimization.
+
+## Project status
+
+PostgreSQL monitoring, query analysis, workload prediction, autonomous index optimization, and learning signals are implemented. Cloud-provider resource optimization and production configuration management are not yet included.
+
+## Author
+
+Taranjot Singh
