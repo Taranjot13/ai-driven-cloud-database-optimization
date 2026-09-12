@@ -1072,3 +1072,25 @@ def optimize_query(
 
         if connection is not None:
             connection.close()
+
+def optimize_index(
+    metric_id,
+    query_text,
+    table_name,
+    column_name
+):
+    """
+    Compatibility wrapper used by the autonomous
+    decision pipeline.
+
+    The decision engine calls optimize_index(),
+    while the core optimizer is implemented
+    by optimize_query().
+    """
+
+    return optimize_query(
+        metric_id=metric_id,
+        query_text=query_text,
+        table_name=table_name,
+        column_name=column_name
+    )

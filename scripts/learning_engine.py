@@ -1,6 +1,7 @@
 import pandas as pd
 from sqlalchemy import create_engine
 
+
 DB_CONFIG = {
     "host": "localhost",
     "port": 5432,
@@ -8,6 +9,7 @@ DB_CONFIG = {
     "user": "postgres",
     "password": "123456t"
 }
+
 
 OPTIMIZATION_DECISIONS = {
     "KEEP INDEX",
@@ -48,12 +50,10 @@ def load_optimization_history():
     """
 
     try:
-        df = pd.read_sql_query(
+        return pd.read_sql_query(
             query,
             engine
         )
-
-        return df
 
     finally:
         engine.dispose()
@@ -67,6 +67,7 @@ def get_learning_signal():
         return {
             "total_attempts": 0,
             "successful": 0,
+            "successful_optimizations": 0,
             "rollbacks": 0,
             "success_rate": 0.0,
             "average_improvement": 0.0,
@@ -144,14 +145,23 @@ def get_learning_signal():
 
     return {
         "total_attempts": total_attempts,
+
+        # Original key
         "successful": successful,
+
+        # Compatibility key expected by main.py
+        "successful_optimizations": successful,
+
         "rollbacks": rollbacks,
         "success_rate": success_rate,
         "average_improvement": average_improvement,
+
         "verified_existing_indexes":
             verified_existing_indexes,
+
         "unverified_existing_indexes":
             unverified_existing_indexes,
+
         "risk_level": risk_level
     }
 
@@ -172,7 +182,7 @@ def analyze_learning_history():
 
     print(
         f"Successful optimizations: "
-        f"{learning['successful']}"
+        f"{learning['successful_optimizations']}"
     )
 
     print(

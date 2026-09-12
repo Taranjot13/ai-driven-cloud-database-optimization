@@ -1,7 +1,9 @@
 import re
 
 import pandas as pd
+
 from sqlalchemy import create_engine
+
 from sklearn.ensemble import IsolationForest
 
 from scripts.query_plan_analyzer import analyze_query_plan
@@ -15,6 +17,7 @@ DB_CONFIG = {
     "password": "123456t"
 }
 
+
 SLOW_QUERY_THRESHOLD_MS = 5.0
 
 
@@ -25,6 +28,7 @@ def get_engine():
         f"@{DB_CONFIG['host']}:{DB_CONFIG['port']}"
         f"/{DB_CONFIG['database']}"
     )
+
     return create_engine(connection_url)
 
 
@@ -42,7 +46,11 @@ def load_metrics():
         ORDER BY recorded_at;
     """
 
-    df = pd.read_sql_query(query, engine)
+    df = pd.read_sql_query(
+        query,
+        engine
+    )
+
     engine.dispose()
 
     return df
@@ -56,7 +64,10 @@ def detect_anomalies(df):
         return result["is_anomaly"]
 
     features = result[
-        ["execution_time_ms", "rows_returned"]
+        [
+            "execution_time_ms",
+            "rows_returned"
+        ]
     ]
 
     model = IsolationForest(
@@ -64,19 +75,29 @@ def detect_anomalies(df):
         random_state=42
     )
 
-    predictions = model.fit_predict(features)
+    predictions = model.fit_predict(
+        features
+    )
 
-    result["is_anomaly"] = predictions == -1
+    result["is_anomaly"] = (
+        predictions == -1
+    )
 
     return result["is_anomaly"]
 
 
 def analyze_workload(df):
-    average_latency = df["execution_time_ms"].mean()
-    latest_latency = df.iloc[-1]["execution_time_ms"]
+    average_latency = (
+        df["execution_time_ms"].mean()
+    )
+
+    latest_latency = (
+        df.iloc[-1]["execution_time_ms"]
+    )
 
     slow_queries = df[
-        df["execution_time_ms"] > SLOW_QUERY_THRESHOLD_MS
+        df["execution_time_ms"]
+        > SLOW_QUERY_THRESHOLD_MS
     ].copy()
 
     return {
@@ -91,7 +112,8 @@ def extract_query_target(query_text):
         return None
 
     table_match = re.search(
-        r"\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)"
+        r"\bFROM\s+"
+        r"([a-zA-Z_][a-zA-Z0-9_]*)"
         r"(?:\s+[a-zA-Z_][a-zA-Z0-9_]*)?",
         query_text,
         re.IGNORECASE
@@ -131,7 +153,8 @@ def extract_composite_index_target(query_text):
         return None
 
     table_match = re.search(
-        r"\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)"
+        r"\bFROM\s+"
+        r"([a-zA-Z_][a-zA-Z0-9_]*)"
         r"(?:\s+([a-zA-Z_][a-zA-Z0-9_]*))?",
         query_text,
         re.IGNORECASE
@@ -154,10 +177,16 @@ def extract_composite_index_target(query_text):
         re.IGNORECASE
     )
 
-    if not table_match or not filter_match or not order_match:
+    if (
+        not table_match
+        or not filter_match
+        or not order_match
+    ):
         return None
 
-    order_direction = order_match.group(2)
+    order_direction = (
+        order_match.group(2)
+    )
 
     if order_direction is None:
         order_direction = "ASC"
@@ -182,7 +211,11 @@ def calculate_learning_risk():
         ORDER BY created_at;
     """
 
-    history = pd.read_sql_query(query, engine)
+    history = pd.read_sql_query(
+        query,
+        engine
+    )
+
     engine.dispose()
 
     if history.empty:
@@ -197,21 +230,28 @@ def calculate_learning_risk():
 
     optimization_decisions = history[
         history["decision"].isin(
-            ["KEEP INDEX", "ROLLBACK"]
+            [
+                "KEEP INDEX",
+                "ROLLBACK"
+            ]
         )
     ]
 
-    total_attempts = len(optimization_decisions)
+    total_attempts = len(
+        optimization_decisions
+    )
 
     successful_optimizations = len(
         optimization_decisions[
-            optimization_decisions["decision"] == "KEEP INDEX"
+            optimization_decisions["decision"]
+            == "KEEP INDEX"
         ]
     )
 
     rollbacks = len(
         optimization_decisions[
-            optimization_decisions["decision"] == "ROLLBACK"
+            optimization_decisions["decision"]
+            == "ROLLBACK"
         ]
     )
 
@@ -226,11 +266,14 @@ def calculate_learning_risk():
         }
 
     success_rate = (
-        successful_optimizations / total_attempts
+        successful_optimizations
+        / total_attempts
     ) * 100
 
     average_improvement = (
-        optimization_decisions["improvement_percent"]
+        optimization_decisions[
+            "improvement_percent"
+        ]
         .dropna()
         .mean()
     )
@@ -240,10 +283,13 @@ def calculate_learning_risk():
 
     if total_attempts < 3:
         risk_level = "INSUFFICIENT_DATA"
+
     elif success_rate >= 80:
         risk_level = "LOW"
+
     elif success_rate >= 50:
         risk_level = "MEDIUM"
+
     else:
         risk_level = "HIGH"
 
@@ -251,9 +297,11 @@ def calculate_learning_risk():
         "risk_level": risk_level,
         "success_rate": success_rate,
         "total_attempts": total_attempts,
-        "successful_optimizations": successful_optimizations,
+        "successful_optimizations":
+            successful_optimizations,
         "rollbacks": rollbacks,
-        "average_improvement": average_improvement
+        "average_improvement":
+            average_improvement
     }
 
 
@@ -270,6 +318,12 @@ def determine_optimization_policy(
     if plan_diagnosis == "INDEXED_AND_WITHIN_THRESHOLD":
         return {
             "policy": "MONITORING",
+            "optimization_allowed": False
+        }
+
+    if plan_diagnosis == "EXISTING_COMPOSITE_INDEX":
+        return {
+            "policy": "VERIFICATION",
             "optimization_allowed": False
         }
 
@@ -303,8 +357,49 @@ def determine_optimization_policy(
     }
 
 
-def make_decision(analysis, predicted_latency=None):
-    slow_queries = analysis["slow_queries"]
+def build_decision_result(
+    action,
+    metric_id,
+    query_text,
+    table=None,
+    column=None,
+    filter_column=None,
+    order_column=None,
+    order_direction=None,
+    learning=None,
+    policy=None,
+    plan_status="UNKNOWN"
+):
+    return {
+        "action": action,
+        "metric_id": metric_id,
+        "query_text": query_text,
+        "table": table,
+        "column": column,
+        "filter_column": filter_column,
+        "order_column": order_column,
+        "order_direction": order_direction,
+        "learning_risk": (
+            learning["risk_level"]
+            if learning
+            else "UNKNOWN"
+        ),
+        "learning_policy": (
+            policy["policy"]
+            if policy
+            else "UNKNOWN"
+        ),
+        "plan_status": plan_status
+    }
+
+
+def make_decision(
+    analysis,
+    predicted_latency=None
+):
+    slow_queries = analysis[
+        "slow_queries"
+    ]
 
     learning = calculate_learning_risk()
 
@@ -319,68 +414,114 @@ def make_decision(analysis, predicted_latency=None):
     )
 
     if slow_queries.empty:
-        print("\nNo slow queries detected.")
+        print(
+            "\nNo slow queries detected."
+        )
 
-        return {
-            "action": "MONITOR",
-            "metric_id": None,
-            "query_text": None,
-            "table": None,
-            "column": None,
-            "filter_column": None,
-            "order_column": None,
-            "order_direction": None,
-            "learning_risk": learning["risk_level"],
-            "learning_policy": "MONITORING",
-            "plan_status": "NORMAL"
-        }
+        return build_decision_result(
+            action="MONITOR",
+            metric_id=None,
+            query_text=None,
+            learning=learning,
+            policy={
+                "policy": "MONITORING"
+            },
+            plan_status="NORMAL"
+        )
 
     selected = slow_queries.sort_values(
         "execution_time_ms",
         ascending=False
     ).iloc[0]
 
-    metric_id = int(selected["metric_id"])
-    query_text = selected["query_text"]
-    execution_time = float(selected["execution_time_ms"])
+    metric_id = int(
+        selected["metric_id"]
+    )
 
-    print("\nProblem detected: Slow query")
-    print(f"Metric ID: {metric_id}")
-    print(f"Execution time: {execution_time:.3f} ms")
-    print("Query:")
-    print(f"    {query_text}")
+    query_text = selected[
+        "query_text"
+    ]
+
+    execution_time = float(
+        selected["execution_time_ms"]
+    )
 
     print(
-        "\nRunning query-plan analysis before optimization..."
+        "\nProblem detected: Slow query"
+    )
+
+    print(
+        f"Metric ID: {metric_id}"
+    )
+
+    print(
+        f"Execution time: "
+        f"{execution_time:.3f} ms"
+    )
+
+    print(
+        "Query:"
+    )
+
+    print(
+        f"    {query_text}"
+    )
+
+    print(
+        "\nRunning query-plan analysis "
+        "before optimization..."
     )
 
     try:
-        plan_result = analyze_query_plan(query_text)
-
-        plan_status = (
-            plan_result.get("status")
-            or plan_result.get("diagnosis")
-            or plan_result.get("query_plan_status")
-            or plan_result.get("plan_status")
+        plan_result = analyze_query_plan(
+            query_text
         )
 
-        if isinstance(plan_status, dict):
+        diagnosis = plan_result.get(
+            "diagnosis",
+            {}
+        )
+
+        plan_status = (
+            diagnosis.get("status")
+            if isinstance(
+                diagnosis,
+                dict
+            )
+            else None
+        )
+
+        if plan_status is None:
             plan_status = (
-                plan_status.get("status")
-                or plan_status.get("type")
-                or plan_status.get("diagnosis")
+                plan_result.get(
+                    "status"
+                )
             )
 
         if plan_status is None:
             plan_status = "UNKNOWN"
 
-        plan_status = str(plan_status).upper()
+        plan_status = str(
+            plan_status
+        ).upper()
 
         plan_recommendation = (
-            plan_result.get("recommended_action")
-            or plan_result.get("recommendation")
-            or plan_result.get("recommended")
+            diagnosis.get(
+                "recommended_action"
+            )
+            if isinstance(
+                diagnosis,
+                dict
+            )
+            else None
         )
+
+        if plan_recommendation is None:
+            plan_recommendation = (
+                plan_result.get(
+                    "recommended_action"
+                )
+            )
 
         candidates = plan_result.get(
             "optimization_candidates",
@@ -391,28 +532,52 @@ def make_decision(analysis, predicted_latency=None):
             candidates = []
 
         for candidate in candidates:
-            if not isinstance(candidate, dict):
+
+            if not isinstance(
+                candidate,
+                dict
+            ):
                 continue
 
             candidate_type = str(
-                candidate.get("type", "")
+                candidate.get(
+                    "type",
+                    ""
+                )
             ).upper()
 
-            if candidate_type == "COMPOSITE_INDEX_CANDIDATE":
-                plan_status = "COMPOSITE_INDEX_CANDIDATE"
+            if (
+                candidate_type
+                == "EXISTING_COMPOSITE_INDEX"
+            ):
+                plan_status = (
+                    "EXISTING_COMPOSITE_INDEX"
+                )
+
+                plan_recommendation = (
+                    "VERIFY_EXISTING_COMPOSITE_INDEX"
+                )
+
+                break
+
+            if (
+                candidate_type
+                == "COMPOSITE_INDEX_CANDIDATE"
+            ):
+                plan_status = (
+                    "COMPOSITE_INDEX_CANDIDATE"
+                )
 
                 if plan_recommendation is None:
                     plan_recommendation = (
-                        candidate.get(
-                            "recommended_action"
-                        )
-                        or "TEST_COMPOSITE_INDEX"
+                        "TEST_COMPOSITE_INDEX"
                     )
 
                 break
 
         print(
-            f"\nQuery-plan status: {plan_status}"
+            f"\nQuery-plan status: "
+            f"{plan_status}"
         )
 
         if plan_recommendation:
@@ -422,22 +587,25 @@ def make_decision(analysis, predicted_latency=None):
             )
 
     except Exception as error:
-        print("\nQuery-plan analysis failed.")
-        print(f"Reason: {error}")
 
-        return {
-            "action": "ANALYZE_WORKLOAD",
-            "metric_id": metric_id,
-            "query_text": query_text,
-            "table": None,
-            "column": None,
-            "filter_column": None,
-            "order_column": None,
-            "order_direction": None,
-            "learning_risk": learning["risk_level"],
-            "learning_policy": "PROTECTIVE",
-            "plan_status": "ANALYSIS_FAILED"
-        }
+        print(
+            "\nQuery-plan analysis failed."
+        )
+
+        print(
+            f"Reason: {error}"
+        )
+
+        return build_decision_result(
+            action="ANALYZE_WORKLOAD",
+            metric_id=metric_id,
+            query_text=query_text,
+            learning=learning,
+            policy={
+                "policy": "PROTECTIVE"
+            },
+            plan_status="ANALYSIS_FAILED"
+        )
 
     policy = determine_optimization_policy(
         learning["risk_level"],
@@ -445,7 +613,8 @@ def make_decision(analysis, predicted_latency=None):
     )
 
     print(
-        f"\nLearning policy: {policy['policy']}"
+        f"\nLearning policy: "
+        f"{policy['policy']}"
     )
 
     print(
@@ -454,34 +623,120 @@ def make_decision(analysis, predicted_latency=None):
     )
 
     # =========================================================
-    # COMPOSITE INDEX CANDIDATE
+    # EXISTING COMPOSITE INDEX
     # =========================================================
 
-    if plan_status == "COMPOSITE_INDEX_CANDIDATE":
-
-        composite_target = extract_composite_index_target(
-            query_text
+    if (
+        plan_status
+        == "EXISTING_COMPOSITE_INDEX"
+    ):
+        composite_target = (
+            extract_composite_index_target(
+                query_text
+            )
         )
 
         if composite_target is None:
+
             print(
-                "\nComposite index candidate detected, "
-                "but the target could not be safely extracted."
+                "\nExisting composite index detected, "
+                "but the target could not be safely "
+                "extracted."
             )
 
-            return {
-                "action": "ANALYZE_WORKLOAD",
-                "metric_id": metric_id,
-                "query_text": query_text,
-                "table": None,
-                "column": None,
-                "filter_column": None,
-                "order_column": None,
-                "order_direction": None,
-                "learning_risk": learning["risk_level"],
-                "learning_policy": policy["policy"],
-                "plan_status": plan_status
-            }
+            return build_decision_result(
+                action="ANALYZE_WORKLOAD",
+                metric_id=metric_id,
+                query_text=query_text,
+                learning=learning,
+                policy=policy,
+                plan_status=plan_status
+            )
+
+        print(
+            "\nExisting composite index detected."
+        )
+
+        print(
+            "Target table: "
+            f"{composite_target['table']}"
+        )
+
+        print(
+            "Filter column: "
+            f"{composite_target['filter_column']}"
+        )
+
+        print(
+            "Order column: "
+            f"{composite_target['order_column']}"
+        )
+
+        print(
+            "Order direction: "
+            f"{composite_target['order_direction']}"
+        )
+
+        print(
+            "\nDecision: "
+            "VERIFY_EXISTING_COMPOSITE_INDEX"
+        )
+
+        return build_decision_result(
+            action="VERIFY_EXISTING_COMPOSITE_INDEX",
+            metric_id=metric_id,
+            query_text=query_text,
+            table=composite_target[
+                "table"
+            ],
+            column=composite_target[
+                "filter_column"
+            ],
+            filter_column=composite_target[
+                "filter_column"
+            ],
+            order_column=composite_target[
+                "order_column"
+            ],
+            order_direction=composite_target[
+                "order_direction"
+            ],
+            learning=learning,
+            policy=policy,
+            plan_status=plan_status
+        )
+
+    # =========================================================
+    # COMPOSITE INDEX CANDIDATE
+    # =========================================================
+
+    if (
+        plan_status
+        == "COMPOSITE_INDEX_CANDIDATE"
+    ):
+
+        composite_target = (
+            extract_composite_index_target(
+                query_text
+            )
+        )
+
+        if composite_target is None:
+
+            print(
+                "\nComposite index candidate detected, "
+                "but the target could not be safely "
+                "extracted."
+            )
+
+            return build_decision_result(
+                action="ANALYZE_WORKLOAD",
+                metric_id=metric_id,
+                query_text=query_text,
+                learning=learning,
+                policy=policy,
+                plan_status=plan_status
+            )
 
         print(
             "\nComposite index candidate detected."
@@ -517,53 +772,62 @@ def make_decision(analysis, predicted_latency=None):
         if policy["optimization_allowed"]:
 
             print(
-                "\nDecision: OPTIMIZE_COMPOSITE_INDEX"
+                "\nDecision: "
+                "OPTIMIZE_COMPOSITE_INDEX"
             )
 
-            return {
-                "action": "OPTIMIZE_COMPOSITE_INDEX",
-                "metric_id": metric_id,
-                "query_text": query_text,
-                "table": composite_target["table"],
-                "column": composite_target["filter_column"],
-                "filter_column": composite_target[
+            return build_decision_result(
+                action="OPTIMIZE_COMPOSITE_INDEX",
+                metric_id=metric_id,
+                query_text=query_text,
+                table=composite_target[
+                    "table"
+                ],
+                column=composite_target[
                     "filter_column"
                 ],
-                "order_column": composite_target[
+                filter_column=composite_target[
+                    "filter_column"
+                ],
+                order_column=composite_target[
                     "order_column"
                 ],
-                "order_direction": composite_target[
+                order_direction=composite_target[
                     "order_direction"
                 ],
-                "learning_risk": learning["risk_level"],
-                "learning_policy": policy["policy"],
-                "plan_status": plan_status
-            }
+                learning=learning,
+                policy=policy,
+                plan_status=plan_status
+            )
 
         print(
             "\nComposite optimization blocked "
             "by the current learning safety policy."
         )
 
-        return {
-            "action": "ANALYZE_WORKLOAD",
-            "metric_id": metric_id,
-            "query_text": query_text,
-            "table": composite_target["table"],
-            "column": composite_target["filter_column"],
-            "filter_column": composite_target[
+        return build_decision_result(
+            action="ANALYZE_WORKLOAD",
+            metric_id=metric_id,
+            query_text=query_text,
+            table=composite_target[
+                "table"
+            ],
+            column=composite_target[
                 "filter_column"
             ],
-            "order_column": composite_target[
+            filter_column=composite_target[
+                "filter_column"
+            ],
+            order_column=composite_target[
                 "order_column"
             ],
-            "order_direction": composite_target[
+            order_direction=composite_target[
                 "order_direction"
             ],
-            "learning_risk": learning["risk_level"],
-            "learning_policy": policy["policy"],
-            "plan_status": plan_status
-        }
+            learning=learning,
+            policy=policy,
+            plan_status=plan_status
+        )
 
     # =========================================================
     # SLOW QUERY WITH EXISTING INDEX
@@ -572,46 +836,40 @@ def make_decision(analysis, predicted_latency=None):
     if plan_status == "SLOW_WITH_INDEX":
 
         print(
-            "\nDecision: REVIEW_QUERY_AND_RESOURCES"
+            "\nDecision: "
+            "REVIEW_QUERY_AND_RESOURCES"
         )
 
-        return {
-            "action": "ANALYZE_WORKLOAD",
-            "metric_id": metric_id,
-            "query_text": query_text,
-            "table": None,
-            "column": None,
-            "filter_column": None,
-            "order_column": None,
-            "order_direction": None,
-            "learning_risk": learning["risk_level"],
-            "learning_policy": policy["policy"],
-            "plan_status": plan_status
-        }
+        return build_decision_result(
+            action="ANALYZE_WORKLOAD",
+            metric_id=metric_id,
+            query_text=query_text,
+            learning=learning,
+            policy=policy,
+            plan_status=plan_status
+        )
 
     # =========================================================
     # HEALTHY INDEXED QUERY
     # =========================================================
 
-    if plan_status == "INDEXED_AND_WITHIN_THRESHOLD":
+    if (
+        plan_status
+        == "INDEXED_AND_WITHIN_THRESHOLD"
+    ):
 
         print(
             "\nDecision: MONITOR"
         )
 
-        return {
-            "action": "MONITOR",
-            "metric_id": metric_id,
-            "query_text": query_text,
-            "table": None,
-            "column": None,
-            "filter_column": None,
-            "order_column": None,
-            "order_direction": None,
-            "learning_risk": learning["risk_level"],
-            "learning_policy": policy["policy"],
-            "plan_status": plan_status
-        }
+        return build_decision_result(
+            action="MONITOR",
+            metric_id=metric_id,
+            query_text=query_text,
+            learning=learning,
+            policy=policy,
+            plan_status=plan_status
+        )
 
     # =========================================================
     # SEQUENTIAL SCAN
@@ -619,53 +877,52 @@ def make_decision(analysis, predicted_latency=None):
 
     if plan_status == "SEQUENTIAL_SCAN":
 
-        target = extract_query_target(query_text)
+        target = extract_query_target(
+            query_text
+        )
 
-        if target is not None and policy["optimization_allowed"]:
+        if (
+            target is not None
+            and policy["optimization_allowed"]
+        ):
 
             print(
                 "\nDecision: OPTIMIZE_INDEX"
             )
 
-            return {
-                "action": "OPTIMIZE_INDEX",
-                "metric_id": metric_id,
-                "query_text": query_text,
-                "table": target["table"],
-                "column": target["column"],
-                "filter_column": None,
-                "order_column": None,
-                "order_direction": None,
-                "learning_risk": learning["risk_level"],
-                "learning_policy": policy["policy"],
-                "plan_status": plan_status
-            }
+            return build_decision_result(
+                action="OPTIMIZE_INDEX",
+                metric_id=metric_id,
+                query_text=query_text,
+                table=target["table"],
+                column=target["column"],
+                learning=learning,
+                policy=policy,
+                plan_status=plan_status
+            )
 
         print(
             "\nDecision: ANALYZE_WORKLOAD"
         )
 
-        return {
-            "action": "ANALYZE_WORKLOAD",
-            "metric_id": metric_id,
-            "query_text": query_text,
-            "table": (
+        return build_decision_result(
+            action="ANALYZE_WORKLOAD",
+            metric_id=metric_id,
+            query_text=query_text,
+            table=(
                 target["table"]
                 if target is not None
                 else None
             ),
-            "column": (
+            column=(
                 target["column"]
                 if target is not None
                 else None
             ),
-            "filter_column": None,
-            "order_column": None,
-            "order_direction": None,
-            "learning_risk": learning["risk_level"],
-            "learning_policy": policy["policy"],
-            "plan_status": plan_status
-        }
+            learning=learning,
+            policy=policy,
+            plan_status=plan_status
+        )
 
     # =========================================================
     # FALLBACK
@@ -675,19 +932,14 @@ def make_decision(analysis, predicted_latency=None):
         "\nDecision: ANALYZE_WORKLOAD"
     )
 
-    return {
-        "action": "ANALYZE_WORKLOAD",
-        "metric_id": metric_id,
-        "query_text": query_text,
-        "table": None,
-        "column": None,
-        "filter_column": None,
-        "order_column": None,
-        "order_direction": None,
-        "learning_risk": learning["risk_level"],
-        "learning_policy": policy["policy"],
-        "plan_status": plan_status
-    }
+    return build_decision_result(
+        action="ANALYZE_WORKLOAD",
+        metric_id=metric_id,
+        query_text=query_text,
+        learning=learning,
+        policy=policy,
+        plan_status=plan_status
+    )
 
 
 if __name__ == "__main__":
@@ -703,17 +955,25 @@ if __name__ == "__main__":
 
     else:
 
-        df["is_anomaly"] = detect_anomalies(df)
+        df["is_anomaly"] = (
+            detect_anomalies(df)
+        )
 
-        analysis = analyze_workload(df)
+        analysis = analyze_workload(
+            df
+        )
 
         decision = make_decision(
             analysis
         )
 
-        print("\nDecision:")
         print(
-            f"Action: {decision['action']}"
+            "\nDecision:"
+        )
+
+        print(
+            f"Action: "
+            f"{decision['action']}"
         )
 
         print(

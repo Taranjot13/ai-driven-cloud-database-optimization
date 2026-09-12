@@ -1,5 +1,6 @@
 import psycopg2
 import pandas as pd
+from sqlalchemy import create_engine
 from sklearn.ensemble import RandomForestRegressor
 
 
@@ -12,9 +13,19 @@ DB_CONFIG = {
 }
 
 
-def load_metrics():
+def get_database_url():
+    return (
+        f"postgresql+psycopg2://"
+        f"{DB_CONFIG['user']}:"
+        f"{DB_CONFIG['password']}@"
+        f"{DB_CONFIG['host']}:"
+        f"{DB_CONFIG['port']}/"
+        f"{DB_CONFIG['database']}"
+    )
 
-    connection = psycopg2.connect(**DB_CONFIG)
+
+def load_metrics():
+    engine = create_engine(get_database_url())
 
     query = """
         SELECT
@@ -26,24 +37,22 @@ def load_metrics():
         ORDER BY recorded_at;
     """
 
-    df = pd.read_sql_query(query, connection)
-
-    connection.close()
-
-    return df
+    try:
+        df = pd.read_sql_query(query, engine)
+        return df
+    finally:
+        engine.dispose()
 
 
 def predict_next_execution_time(df):
-
     if len(df) < 10:
         return None
 
-    df["recorded_at"] = pd.to_datetime(
-        df["recorded_at"]
-    )
+    df = df.copy()
+
+    df["recorded_at"] = pd.to_datetime(df["recorded_at"])
 
     df["time_index"] = range(len(df))
-
     df["hour"] = df["recorded_at"].dt.hour
     df["minute"] = df["recorded_at"].dt.minute
     df["second"] = df["recorded_at"].dt.second
@@ -70,80 +79,41 @@ def predict_next_execution_time(df):
 
     next_index = len(df)
 
-    prediction_input = pd.DataFrame(
-        [{
-            "time_index": next_index,
-            "hour": latest["hour"],
-            "minute": latest["minute"],
-            "second": latest["second"],
-            "rows_returned": latest["rows_returned"]
-        }]
-    )
+    prediction_input = pd.DataFrame([{
+        "time_index": next_index,
+        "hour": latest["hour"],
+        "minute": latest["minute"],
+        "second": latest["second"],
+        "rows_returned": latest["rows_returned"]
+    }])
 
-    prediction = model.predict(
-        prediction_input
-    )[0]
+    prediction = model.predict(prediction_input)[0]
 
     return prediction
 
 
 def run_prediction():
-
     df = load_metrics()
 
     if len(df) < 10:
-
-        print(
-            "Not enough performance data "
-            "for workload prediction."
-        )
-
+        print("Not enough performance data for workload prediction.")
         return None
 
     prediction = predict_next_execution_time(df)
 
-    average_latency = df[
-        "execution_time_ms"
-    ].mean()
-
-    maximum_latency = df[
-        "execution_time_ms"
-    ].max()
+    average_latency = df["execution_time_ms"].mean()
+    maximum_latency = df["execution_time_ms"].max()
 
     print("\n===== WORKLOAD PREDICTION =====\n")
-
-    print(
-        f"Historical observations: {len(df)}"
-    )
-
-    print(
-        f"Average execution time: "
-        f"{average_latency:.3f} ms"
-    )
-
-    print(
-        f"Maximum execution time: "
-        f"{maximum_latency:.3f} ms"
-    )
-
-    print(
-        f"Predicted next execution time: "
-        f"{prediction:.3f} ms"
-    )
+    print(f"Historical observations: {len(df)}")
+    print(f"Average execution time: {average_latency:.3f} ms")
+    print(f"Maximum execution time: {maximum_latency:.3f} ms")
+    print(f"Predicted next execution time: {prediction:.3f} ms")
 
     if prediction > average_latency:
-
-        print(
-            "\nPrediction: Potential "
-            "performance degradation detected."
-        )
-
+        print("\nPrediction: Potential performance degradation detected.")
     else:
-
-        print(
-            "\nPrediction: Expected "
-            "performance within normal range."
-        )
+        print("\nPrediction: Expected performance within normal range.")
 
     return prediction
 

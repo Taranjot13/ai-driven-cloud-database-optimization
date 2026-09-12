@@ -1,84 +1,105 @@
-import sys
-import os
-
-# Allow imports from the project root
-PROJECT_ROOT = os.path.dirname(
-    os.path.dirname(os.path.abspath(__file__))
-)
-
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
-
+from scripts.monitor_database import monitor_database
+from scripts.detect_slow_queries import detect_slow_queries
+from scripts.workload_prediction import run_prediction
 from scripts.decision_engine import (
     load_metrics,
     detect_anomalies,
     analyze_workload,
     make_decision
 )
-
-from scripts.workload_prediction import (
-    predict_next_execution_time
-)
-
 from scripts.autonomous_optimizer import (
-    optimize_query
+    optimize_index
+)
+from scripts.composite_index_optimizer import (
+    optimize_composite_index
+)
+from scripts.learning_engine import (
+    get_learning_signal
 )
 
 
-# ---------------------------------------------------------
-# SYSTEM HEADER
-# ---------------------------------------------------------
+def print_learning_status():
+    learning = get_learning_signal()
 
-def print_header():
+    print("\n===== LEARNING STATUS =====")
+    print(
+        f"Optimization attempts: "
+        f"{learning['total_attempts']}"
+    )
+    print(
+        f"Successful optimizations: "
+        f"{learning['successful_optimizations']}"
+    )
+    print(
+        f"Rollbacks: "
+        f"{learning['rollbacks']}"
+    )
+    print(
+        f"Historical success rate: "
+        f"{learning['success_rate']:.2f}%"
+    )
+    print(
+        f"Average improvement: "
+        f"{learning['average_improvement']:.2f}%"
+    )
+    print(
+        f"Learning risk: "
+        f"{learning['risk_level']}"
+    )
 
-    print("\n")
-    print("=" * 60)
-    print(" AI-DRIVEN AUTONOMOUS CLOUD DATABASE OPTIMIZATION SYSTEM")
-    print("=" * 60)
+    return learning
 
 
-# ---------------------------------------------------------
-# MAIN AUTONOMOUS PIPELINE
-# ---------------------------------------------------------
+def main():
 
-def run_autonomous_system():
+    print("\n========================================")
+    print(" AI-DRIVEN CLOUD DATABASE OPTIMIZATION")
+    print("========================================")
 
-    print_header()
+    # =========================================================
+    # 1. DATABASE MONITORING
+    # =========================================================
 
-    # -----------------------------------------------------
-    # STEP 1 — LOAD DATABASE PERFORMANCE DATA
-    # -----------------------------------------------------
+    print("\n[1] DATABASE MONITORING")
 
-    print("\n[1] Loading database performance data...")
+    monitor_database()
+
+    # =========================================================
+    # 2. SLOW QUERY DETECTION
+    # =========================================================
+
+    print("\n[2] SLOW QUERY DETECTION")
+
+    detect_slow_queries()
+
+    # =========================================================
+    # 3. WORKLOAD PREDICTION
+    # =========================================================
+
+    print("\n[3] WORKLOAD PREDICTION")
+
+    predicted_latency = run_prediction()
+
+    # =========================================================
+    # 4. LOAD PERFORMANCE DATA
+    # =========================================================
 
     df = load_metrics()
 
     if len(df) < 10:
 
         print(
-            f"\nNot enough performance data."
-        )
-
-        print(
-            f"Available records: {len(df)}"
+            "\nNot enough performance data "
+            "for autonomous optimization."
         )
 
         return
 
+    # =========================================================
+    # 5. AI ANOMALY DETECTION
+    # =========================================================
 
-    print(
-        f"Loaded {len(df)} performance records."
-    )
-
-
-    # -----------------------------------------------------
-    # STEP 2 — AI ANOMALY DETECTION
-    # -----------------------------------------------------
-
-    print(
-        "\n[2] Running AI anomaly detection..."
-    )
+    print("\n[4] AI ANOMALY DETECTION")
 
     df["is_anomaly"] = detect_anomalies(df)
 
@@ -87,17 +108,15 @@ def run_autonomous_system():
     )
 
     print(
-        f"ML anomalies detected: {anomaly_count}"
+        f"Anomalies detected: "
+        f"{anomaly_count}"
     )
 
+    # =========================================================
+    # 6. WORKLOAD ANALYSIS
+    # =========================================================
 
-    # -----------------------------------------------------
-    # STEP 3 — WORKLOAD ANALYSIS
-    # -----------------------------------------------------
-
-    print(
-        "\n[3] Analyzing workload..."
-    )
+    print("\n[5] WORKLOAD ANALYSIS")
 
     analysis = analyze_workload(df)
 
@@ -116,157 +135,337 @@ def run_autonomous_system():
         f"{len(analysis['slow_queries'])}"
     )
 
+    # =========================================================
+    # 7. AUTONOMOUS DECISION ENGINE
+    # =========================================================
 
-    # -----------------------------------------------------
-    # STEP 4 — WORKLOAD PREDICTION
-    # -----------------------------------------------------
-
-    print(
-        "\n[4] Predicting future workload performance..."
-    )
-
-    predicted_latency = (
-        predict_next_execution_time(df)
-    )
-
-    if predicted_latency is not None:
-
-        print(
-            f"Predicted next execution time: "
-            f"{predicted_latency:.3f} ms"
-        )
-
-    else:
-
-        print(
-            "Prediction unavailable."
-        )
-
-
-    # -----------------------------------------------------
-    # STEP 5 — AUTONOMOUS DECISION
-    # -----------------------------------------------------
-
-    print(
-        "\n[5] Running autonomous decision engine..."
-    )
+    print("\n[6] AUTONOMOUS DECISION ENGINE")
 
     decision = make_decision(
         analysis,
         predicted_latency
     )
 
-
     print(
-        "\nDecision selected:"
+        f"\nSelected action: "
+        f"{decision['action']}"
     )
 
-    print(
-        f"Action: {decision['action']}"
-    )
+    # =========================================================
+    # 8. EXECUTE DECISION
+    # =========================================================
 
+    action = decision["action"]
 
-    # -----------------------------------------------------
-    # STEP 6 — EXECUTE OPTIMIZATION
-    # -----------------------------------------------------
+    # ---------------------------------------------------------
+    # NORMAL MONITORING
+    # ---------------------------------------------------------
 
-    if decision["action"] == "OPTIMIZE_INDEX":
+    if action == "MONITOR":
 
         print(
-            "\n[6] Autonomous optimization triggered."
+            "\n[7] MONITORING MODE"
         )
 
-        if (
-            decision["metric_id"] is None
-            or decision["query_text"] is None
-            or decision["table"] is None
-            or decision["column"] is None
-        ):
+        print(
+            "No database modification required."
+        )
 
-            print(
-                "Optimization target is incomplete."
-            )
+    # ---------------------------------------------------------
+    # STANDARD INDEX OPTIMIZATION
+    # ---------------------------------------------------------
 
-            print(
-                "Optimization cancelled for safety."
-            )
+    elif action == "OPTIMIZE_INDEX":
 
-            return
+        print(
+            "\n[7] AUTONOMOUS INDEX OPTIMIZATION"
+        )
 
-
-        result = optimize_query(
+        result = optimize_index(
             metric_id=decision["metric_id"],
             query_text=decision["query_text"],
             table_name=decision["table"],
             column_name=decision["column"]
         )
 
-
-        # -------------------------------------------------
-        # STEP 7 — DISPLAY VERIFICATION RESULT
-        # -------------------------------------------------
-
         print(
-            "\n[7] Optimization verification complete."
-        )
-
-        print(
-            f"Baseline: "
-            f"{result['baseline_time_ms']:.3f} ms"
-        )
-
-        print(
-            f"Optimized: "
-            f"{result['optimized_time_ms']:.3f} ms"
-        )
-
-        print(
-            f"Improvement: "
-            f"{result['improvement_percent']:.2f}%"
+            "\nOptimization result:"
         )
 
         print(
             f"Decision: "
-            f"{result['decision']}"
+            f"{result.get('decision')}"
         )
 
+        if result.get("baseline_time_ms") is not None:
+            print(
+                f"Baseline: "
+                f"{result['baseline_time_ms']:.3f} ms"
+            )
 
-    # -----------------------------------------------------
-    # STEP 6B — WORKLOAD ANALYSIS
-    # -----------------------------------------------------
+        if result.get("optimized_time_ms") is not None:
+            print(
+                f"Optimized: "
+                f"{result['optimized_time_ms']:.3f} ms"
+            )
 
-    elif decision["action"] == "ANALYZE_WORKLOAD":
+        if result.get("improvement_percent") is not None:
+            print(
+                f"Improvement: "
+                f"{result['improvement_percent']:.2f}%"
+            )
+
+    # ---------------------------------------------------------
+    # COMPOSITE INDEX OPTIMIZATION
+    # ---------------------------------------------------------
+
+    elif action == "OPTIMIZE_COMPOSITE_INDEX":
 
         print(
-            "\n[6] Additional workload analysis required."
+            "\n[7] AUTONOMOUS COMPOSITE INDEX OPTIMIZATION"
+        )
+
+        result = optimize_composite_index(
+            metric_id=decision["metric_id"],
+            query_text=decision["query_text"],
+            table_name=decision["table"],
+            filter_column=decision["filter_column"],
+            order_column=decision["order_column"],
+            direction=decision["order_direction"]
+        )
+
+        print(
+            "\nComposite optimization result:"
+        )
+
+        print(
+            f"Decision: "
+            f"{result.get('decision')}"
+        )
+
+        if result.get("baseline_time_ms") is not None:
+            print(
+                f"Baseline median: "
+                f"{result['baseline_time_ms']:.3f} ms"
+            )
+
+        if result.get("optimized_time_ms") is not None:
+            print(
+                f"Optimized median: "
+                f"{result['optimized_time_ms']:.3f} ms"
+            )
+
+        if result.get("improvement_percent") is not None:
+            print(
+                f"Observed improvement: "
+                f"{result['improvement_percent']:.2f}%"
+            )
+
+        if result.get("decision") == "EXISTING_INDEX":
+
+            print(
+                "\nExisting composite index detected."
+            )
+
+            print(
+                f"Index preserved: "
+                f"{result.get('index_name')}"
+            )
+
+            print(
+                "No new index was created."
+            )
+
+            print(
+                "No performance improvement was "
+                "claimed because no new comparison "
+                "was performed."
+            )
+
+    # ---------------------------------------------------------
+    # EXISTING COMPOSITE INDEX VERIFICATION
+    # ---------------------------------------------------------
+
+    elif action == "VERIFY_EXISTING_COMPOSITE_INDEX":
+
+        print(
+            "\n[7] EXISTING COMPOSITE INDEX VERIFICATION"
+        )
+
+        print(
+            "The decision engine detected that a "
+            "matching composite index already exists."
+        )
+
+        print(
+            "\nTarget:"
+        )
+
+        print(
+            f"Table: "
+            f"{decision['table']}"
+        )
+
+        print(
+            f"Filter column: "
+            f"{decision['filter_column']}"
+        )
+
+        print(
+            f"Order column: "
+            f"{decision['order_column']}"
+        )
+
+        print(
+            f"Order direction: "
+            f"{decision['order_direction']}"
+        )
+
+        print(
+            "\nRunning measured verification..."
+        )
+
+        result = optimize_composite_index(
+            metric_id=decision["metric_id"],
+            query_text=decision["query_text"],
+            table_name=decision["table"],
+            filter_column=decision["filter_column"],
+            order_column=decision["order_column"],
+            direction=decision["order_direction"]
+        )
+
+        print(
+            "\n===== EXISTING INDEX VERIFICATION RESULT ====="
+        )
+
+        print(
+            f"Decision: "
+            f"{result.get('decision')}"
+        )
+
+        if result.get("index_name"):
+
+            print(
+                f"Index: "
+                f"{result['index_name']}"
+            )
+
+        if result.get("baseline_time_ms") is not None:
+
+            print(
+                f"Measured median: "
+                f"{result['baseline_time_ms']:.3f} ms"
+            )
+
+        if result.get("optimized_time_ms") is not None:
+
+            print(
+                f"Optimized median: "
+                f"{result['optimized_time_ms']:.3f} ms"
+            )
+
+        if result.get("improvement_percent") is not None:
+
+            print(
+                f"Observed improvement: "
+                f"{result['improvement_percent']:.2f}%"
+            )
+
+        if result.get("decision") == "EXISTING_INDEX":
+
+            print(
+                "\nExisting index preserved."
+            )
+
+            print(
+                "No new index was created."
+            )
+
+        elif result.get("decision") == "EXISTING INDEX VERIFIED":
+
+            print(
+                "\nExisting composite index verified."
+            )
+
+            print(
+                "The index produced a stable "
+                "measured performance result."
+            )
+
+        elif result.get("decision") == "EXISTING INDEX NOT VERIFIED":
+
+            print(
+                "\nExisting composite index could "
+                "not be positively verified."
+            )
+
+            print(
+                "The system did not create a replacement "
+                "index automatically."
+            )
+
+        elif result.get("decision") == "MEASUREMENT UNSTABLE":
+
+            print(
+                "\nVerification measurement was unstable."
+            )
+
+            print(
+                "The existing index was preserved "
+                "because the system could not establish "
+                "a reliable performance conclusion."
+            )
+
+    # ---------------------------------------------------------
+    # WORKLOAD ANALYSIS
+    # ---------------------------------------------------------
+
+    elif action == "ANALYZE_WORKLOAD":
+
+        print(
+            "\n[7] ADDITIONAL WORKLOAD ANALYSIS"
         )
 
         print(
             "No automatic database modification performed."
         )
 
+        print(
+            f"Plan status: "
+            f"{decision['plan_status']}"
+        )
 
-    # -----------------------------------------------------
-    # STEP 6C — MONITORING
-    # -----------------------------------------------------
+    # ---------------------------------------------------------
+    # UNKNOWN ACTION
+    # ---------------------------------------------------------
 
-    elif decision["action"] == "MONITOR":
+    else:
 
         print(
-            "\n[6] System workload is within normal limits."
+            "\n[7] UNKNOWN DECISION"
         )
 
         print(
-            "Continuing monitoring."
+            f"Action returned by decision engine: "
+            f"{action}"
         )
 
+        print(
+            "No database modification performed."
+        )
 
-    # -----------------------------------------------------
-    # FINAL STATUS
-    # -----------------------------------------------------
+    # =========================================================
+    # 9. LEARNING STATUS
+    # =========================================================
+
+    print_learning_status()
+
+    # =========================================================
+    # 10. FINAL SYSTEM STATUS
+    # =========================================================
 
     print(
-        "\n" + "=" * 60
+        "\n========================================"
     )
 
     print(
@@ -274,11 +473,12 @@ def run_autonomous_system():
     )
 
     print(
-        "=" * 60
+        "========================================"
     )
 
     print(
-        f"Action: {decision['action']}"
+        f"Action: "
+        f"{decision['action']}"
     )
 
     print(
@@ -286,27 +486,40 @@ def run_autonomous_system():
         f"{decision['learning_risk']}"
     )
 
+    print(
+        f"Learning policy: "
+        f"{decision['learning_policy']}"
+    )
+
+    print(
+        f"Plan status: "
+        f"{decision['plan_status']}"
+    )
+
     if decision["table"] is not None:
 
-        print(
-            f"Target: "
-            f"{decision['table']}."
-            f"{decision['column']}"
-        )
+        if decision["order_column"] is not None:
+
+            print(
+                "Target: "
+                f"{decision['table']}."
+                f"{decision['filter_column']}, "
+                f"{decision['order_column']} "
+                f"{decision['order_direction']}"
+            )
+
+        else:
+
+            print(
+                "Target: "
+                f"{decision['table']}."
+                f"{decision['column']}"
+            )
 
     print(
         "\nAutonomous optimization cycle completed."
     )
 
-    print(
-        "=" * 60
-    )
-
-
-# ---------------------------------------------------------
-# PROGRAM ENTRY POINT
-# ---------------------------------------------------------
 
 if __name__ == "__main__":
-
-    run_autonomous_system()
+    main()
