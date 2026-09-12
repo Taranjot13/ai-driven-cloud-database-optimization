@@ -1,9 +1,10 @@
 import re
+
 import pandas as pd
 from sqlalchemy import create_engine
 from sklearn.ensemble import IsolationForest
 
-from scripts.learning_engine import get_learning_signal
+from scripts.query_plan_analyzer import analyze_query_plan
 
 
 DB_CONFIG = {
@@ -14,26 +15,21 @@ DB_CONFIG = {
     "password": "123456t"
 }
 
-
-SLOW_QUERY_THRESHOLD = 5.0
-PREDICTION_RISK_THRESHOLD = 5.0
+SLOW_QUERY_THRESHOLD_MS = 5.0
 
 
-def create_database_engine():
-    database_url = (
+def get_engine():
+    connection_url = (
         f"postgresql+psycopg2://"
-        f"{DB_CONFIG['user']}:"
-        f"{DB_CONFIG['password']}@"
-        f"{DB_CONFIG['host']}:"
-        f"{DB_CONFIG['port']}/"
-        f"{DB_CONFIG['database']}"
+        f"{DB_CONFIG['user']}:{DB_CONFIG['password']}"
+        f"@{DB_CONFIG['host']}:{DB_CONFIG['port']}"
+        f"/{DB_CONFIG['database']}"
     )
-
-    return create_engine(database_url)
+    return create_engine(connection_url)
 
 
 def load_metrics():
-    engine = create_database_engine()
+    engine = get_engine()
 
     query = """
         SELECT
@@ -46,30 +42,21 @@ def load_metrics():
         ORDER BY recorded_at;
     """
 
-    try:
-        df = pd.read_sql_query(
-            query,
-            engine
-        )
+    df = pd.read_sql_query(query, engine)
+    engine.dispose()
 
-        return df
-
-    finally:
-        engine.dispose()
+    return df
 
 
 def detect_anomalies(df):
-    if len(df) < 10:
-        return pd.Series(
-            [False] * len(df),
-            index=df.index
-        )
+    result = df.copy()
 
-    features = df[
-        [
-            "execution_time_ms",
-            "rows_returned"
-        ]
+    if len(result) < 10:
+        result["is_anomaly"] = False
+        return result["is_anomaly"]
+
+    features = result[
+        ["execution_time_ms", "rows_returned"]
     ]
 
     model = IsolationForest(
@@ -79,177 +66,250 @@ def detect_anomalies(df):
 
     predictions = model.fit_predict(features)
 
-    return predictions == -1
+    result["is_anomaly"] = predictions == -1
+
+    return result["is_anomaly"]
 
 
 def analyze_workload(df):
-    average_latency = (
-        df["execution_time_ms"].mean()
-    )
-
-    latest_latency = (
-        df.iloc[-1]["execution_time_ms"]
-    )
+    average_latency = df["execution_time_ms"].mean()
+    latest_latency = df.iloc[-1]["execution_time_ms"]
 
     slow_queries = df[
-        df["execution_time_ms"]
-        > SLOW_QUERY_THRESHOLD
-    ]
-
-    anomalies = df[
-        df["is_anomaly"]
-    ]
+        df["execution_time_ms"] > SLOW_QUERY_THRESHOLD_MS
+    ].copy()
 
     return {
         "average_latency": average_latency,
         "latest_latency": latest_latency,
-        "slow_queries": slow_queries,
-        "anomalies": anomalies
+        "slow_queries": slow_queries
     }
 
 
 def extract_query_target(query_text):
     if not query_text:
-        return None, None
+        return None
 
-    from_match = re.search(
-        r"\bFROM\s+([A-Za-z_][A-Za-z0-9_]*)",
+    table_match = re.search(
+        r"\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)"
+        r"(?:\s+[a-zA-Z_][a-zA-Z0-9_]*)?",
         query_text,
         re.IGNORECASE
     )
 
-    where_match = re.search(
-        r"\bWHERE\s+([A-Za-z_][A-Za-z0-9_]*)\s*=",
+    column_match = re.search(
+        r"\bWHERE\s+"
+        r"(?:[a-zA-Z_][a-zA-Z0-9_]*\.)?"
+        r"([a-zA-Z_][a-zA-Z0-9_]*)\s*=",
         query_text,
         re.IGNORECASE
     )
 
-    if not from_match or not where_match:
-        return None, None
+    if not table_match or not column_match:
+        return None
 
-    table_name = from_match.group(1)
-    column_name = where_match.group(1)
+    return {
+        "table": table_match.group(1),
+        "column": column_match.group(1)
+    }
 
-    return table_name, column_name
+
+def extract_composite_index_target(query_text):
+    """
+    Supports both:
+
+        WHERE customer_id = ...
+        ORDER BY order_date DESC
+
+    and:
+
+        WHERE o.customer_id = ...
+        ORDER BY o.order_date DESC
+    """
+
+    if not query_text:
+        return None
+
+    table_match = re.search(
+        r"\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)"
+        r"(?:\s+([a-zA-Z_][a-zA-Z0-9_]*))?",
+        query_text,
+        re.IGNORECASE
+    )
+
+    filter_match = re.search(
+        r"\bWHERE\s+"
+        r"(?:[a-zA-Z_][a-zA-Z0-9_]*\.)?"
+        r"([a-zA-Z_][a-zA-Z0-9_]*)\s*=",
+        query_text,
+        re.IGNORECASE
+    )
+
+    order_match = re.search(
+        r"\bORDER\s+BY\s+"
+        r"(?:[a-zA-Z_][a-zA-Z0-9_]*\.)?"
+        r"([a-zA-Z_][a-zA-Z0-9_]*)"
+        r"(?:\s+(ASC|DESC))?",
+        query_text,
+        re.IGNORECASE
+    )
+
+    if not table_match or not filter_match or not order_match:
+        return None
+
+    order_direction = order_match.group(2)
+
+    if order_direction is None:
+        order_direction = "ASC"
+
+    return {
+        "table": table_match.group(1),
+        "filter_column": filter_match.group(1),
+        "order_column": order_match.group(1),
+        "order_direction": order_direction.upper()
+    }
+
+
+def calculate_learning_risk():
+    engine = get_engine()
+
+    query = """
+        SELECT
+            optimization_type,
+            decision,
+            improvement_percent
+        FROM optimization_history
+        ORDER BY created_at;
+    """
+
+    history = pd.read_sql_query(query, engine)
+    engine.dispose()
+
+    if history.empty:
+        return {
+            "risk_level": "INSUFFICIENT_DATA",
+            "success_rate": 0.0,
+            "total_attempts": 0,
+            "successful_optimizations": 0,
+            "rollbacks": 0,
+            "average_improvement": 0.0
+        }
+
+    optimization_decisions = history[
+        history["decision"].isin(
+            ["KEEP INDEX", "ROLLBACK"]
+        )
+    ]
+
+    total_attempts = len(optimization_decisions)
+
+    successful_optimizations = len(
+        optimization_decisions[
+            optimization_decisions["decision"] == "KEEP INDEX"
+        ]
+    )
+
+    rollbacks = len(
+        optimization_decisions[
+            optimization_decisions["decision"] == "ROLLBACK"
+        ]
+    )
+
+    if total_attempts == 0:
+        return {
+            "risk_level": "INSUFFICIENT_DATA",
+            "success_rate": 0.0,
+            "total_attempts": 0,
+            "successful_optimizations": 0,
+            "rollbacks": 0,
+            "average_improvement": 0.0
+        }
+
+    success_rate = (
+        successful_optimizations / total_attempts
+    ) * 100
+
+    average_improvement = (
+        optimization_decisions["improvement_percent"]
+        .dropna()
+        .mean()
+    )
+
+    if pd.isna(average_improvement):
+        average_improvement = 0.0
+
+    if total_attempts < 3:
+        risk_level = "INSUFFICIENT_DATA"
+    elif success_rate >= 80:
+        risk_level = "LOW"
+    elif success_rate >= 50:
+        risk_level = "MEDIUM"
+    else:
+        risk_level = "HIGH"
+
+    return {
+        "risk_level": risk_level,
+        "success_rate": success_rate,
+        "total_attempts": total_attempts,
+        "successful_optimizations": successful_optimizations,
+        "rollbacks": rollbacks,
+        "average_improvement": average_improvement
+    }
 
 
 def determine_optimization_policy(
-    learning_risk
+    learning_risk,
+    plan_diagnosis=None
 ):
-    """
-    Determine how aggressively the system
-    should perform autonomous optimization
-    based on historical learning evidence.
-    """
+    if plan_diagnosis == "SLOW_WITH_INDEX":
+        return {
+            "policy": "PROTECTIVE",
+            "optimization_allowed": False
+        }
+
+    if plan_diagnosis == "INDEXED_AND_WITHIN_THRESHOLD":
+        return {
+            "policy": "MONITORING",
+            "optimization_allowed": False
+        }
+
+    if plan_diagnosis == "REVIEW_QUERY_AND_RESOURCES":
+        return {
+            "policy": "PROTECTIVE",
+            "optimization_allowed": False
+        }
 
     if learning_risk == "LOW":
         return {
-            "mode": "AUTONOMOUS",
-            "allow_optimization": True,
-            "description":
-                "Historical results strongly "
-                "support autonomous optimization."
+            "policy": "AUTONOMOUS",
+            "optimization_allowed": True
         }
 
     if learning_risk == "MEDIUM":
         return {
-            "mode": "CAUTIOUS",
-            "allow_optimization": True,
-            "description":
-                "Optimization is allowed with "
-                "strict performance verification."
+            "policy": "CAUTIOUS",
+            "optimization_allowed": True
         }
 
     if learning_risk == "INSUFFICIENT_DATA":
         return {
-            "mode": "EXPLORATORY",
-            "allow_optimization": True,
-            "description":
-                "Optimization is allowed cautiously "
-                "while the system builds historical evidence."
-        }
-
-    if learning_risk == "HIGH":
-        return {
-            "mode": "PROTECTIVE",
-            "allow_optimization": False,
-            "description":
-                "Previous optimization results indicate "
-                "high risk. Database modification is blocked."
+            "policy": "EXPLORATORY",
+            "optimization_allowed": True
         }
 
     return {
-        "mode": "PROTECTIVE",
-        "allow_optimization": False,
-        "description":
-            "Learning state is unknown. "
-            "Database modification is blocked."
+        "policy": "PROTECTIVE",
+        "optimization_allowed": False
     }
 
 
-def make_decision(
-    analysis,
-    predicted_latency=None
-):
+def make_decision(analysis, predicted_latency=None):
     slow_queries = analysis["slow_queries"]
-    anomalies = analysis["anomalies"]
 
-    average_latency = analysis["average_latency"]
-    latest_latency = analysis["latest_latency"]
-
-    learning = get_learning_signal()
-
-    learning_policy = determine_optimization_policy(
-        learning["risk_level"]
-    )
-
-    prediction_risk = False
-
-    if predicted_latency is not None:
-        if predicted_latency > PREDICTION_RISK_THRESHOLD:
-            prediction_risk = True
+    learning = calculate_learning_risk()
 
     print(
-        "\n===== AUTONOMOUS DECISION ENGINE =====\n"
-    )
-
-    print(
-        f"Average latency: "
-        f"{average_latency:.3f} ms"
-    )
-
-    print(
-        f"Latest latency: "
-        f"{latest_latency:.3f} ms"
-    )
-
-    if predicted_latency is not None:
-        print(
-            f"Predicted latency: "
-            f"{predicted_latency:.3f} ms"
-        )
-    else:
-        print(
-            "Predicted latency: Not available"
-        )
-
-    print(
-        f"Slow queries detected: "
-        f"{len(slow_queries)}"
-    )
-
-    print(
-        f"ML anomalies detected: "
-        f"{len(anomalies)}"
-    )
-
-    print(
-        f"Prediction risk: "
-        f"{'YES' if prediction_risk else 'NO'}"
-    )
-
-    print(
-        f"Historical optimization success: "
+        f"\nHistorical optimization success: "
         f"{learning['success_rate']:.2f}%"
     )
 
@@ -258,271 +318,8 @@ def make_decision(
         f"{learning['risk_level']}"
     )
 
-    print(
-        f"Learning policy: "
-        f"{learning_policy['mode']}"
-    )
-
-    print(
-        f"Optimization allowed: "
-        f"{'YES' if learning_policy['allow_optimization'] else 'NO'}"
-    )
-
-    print(
-        "\nPolicy interpretation:"
-    )
-
-    print(
-        learning_policy["description"]
-    )
-
-    print(
-        "\n===== DECISION =====\n"
-    )
-
-    if len(slow_queries) > 0:
-
-        query = slow_queries.iloc[0]
-
-        print(
-            "Problem detected: Slow query"
-        )
-
-        print(
-            f"Metric ID: "
-            f"{int(query['metric_id'])}"
-        )
-
-        print(
-            f"Execution time: "
-            f"{query['execution_time_ms']:.3f} ms"
-        )
-
-        print(
-            f"Query: "
-            f"{query['query_text']}"
-        )
-
-        if len(anomalies) > 0:
-            print(
-                "ML signal: "
-                "Performance anomaly detected"
-            )
-
-        if prediction_risk:
-            print(
-                "Prediction signal: "
-                "Future performance risk detected"
-            )
-
-        print(
-            f"\nLearning signal: "
-            f"{learning['risk_level']}"
-        )
-
-        print(
-            f"Optimization policy: "
-            f"{learning_policy['mode']}"
-        )
-
-        table_name, column_name = (
-            extract_query_target(
-                query["query_text"]
-            )
-        )
-
-        if (
-            table_name is None
-            or column_name is None
-        ):
-            print(
-                "\nUnable to safely identify "
-                "an optimization target."
-            )
-
-            print(
-                "Recommended action:"
-            )
-
-            print(
-                "ANALYZE_WORKLOAD"
-            )
-
-            return {
-                "action": "ANALYZE_WORKLOAD",
-                "metric_id":
-                    int(query["metric_id"]),
-                "query_text":
-                    query["query_text"],
-                "table": None,
-                "column": None,
-                "predicted_latency":
-                    predicted_latency,
-                "learning_risk":
-                    learning["risk_level"],
-                "learning_policy":
-                    learning_policy["mode"]
-            }
-
-        print(
-            f"\nOptimization target: "
-            f"{table_name}.{column_name}"
-        )
-
-        if not learning_policy[
-            "allow_optimization"
-        ]:
-
-            print(
-                "\nAutonomous optimization "
-                "blocked by learning policy."
-            )
-
-            print(
-                "The system will not modify "
-                "the database."
-            )
-
-            print(
-                "\nRecommended action:"
-            )
-
-            print(
-                "ANALYZE_WORKLOAD"
-            )
-
-            return {
-                "action": "ANALYZE_WORKLOAD",
-                "metric_id":
-                    int(query["metric_id"]),
-                "query_text":
-                    query["query_text"],
-                "table":
-                    table_name,
-                "column":
-                    column_name,
-                "predicted_latency":
-                    predicted_latency,
-                "learning_risk":
-                    learning["risk_level"],
-                "learning_policy":
-                    learning_policy["mode"]
-            }
-
-        print(
-            "\nLearning policy permits "
-            "autonomous optimization."
-        )
-
-        print(
-            "The optimizer will perform "
-            "performance verification "
-            "and rollback when required."
-        )
-
-        print(
-            "\nRecommended action:"
-        )
-
-        print(
-            "OPTIMIZE_INDEX"
-        )
-
-        return {
-            "action": "OPTIMIZE_INDEX",
-            "metric_id":
-                int(query["metric_id"]),
-            "query_text":
-                query["query_text"],
-            "table":
-                table_name,
-            "column":
-                column_name,
-            "predicted_latency":
-                predicted_latency,
-            "learning_risk":
-                learning["risk_level"],
-            "learning_policy":
-                learning_policy["mode"]
-        }
-
-    elif prediction_risk:
-
-        print(
-            "Problem detected: "
-            "Predicted performance degradation"
-        )
-
-        print(
-            f"Predicted execution time: "
-            f"{predicted_latency:.3f} ms"
-        )
-
-        print(
-            "\nRecommended action:"
-        )
-
-        print(
-            "ANALYZE_WORKLOAD"
-        )
-
-        return {
-            "action": "ANALYZE_WORKLOAD",
-            "metric_id": None,
-            "query_text": None,
-            "table": None,
-            "column": None,
-            "predicted_latency":
-                predicted_latency,
-            "learning_risk":
-                learning["risk_level"],
-            "learning_policy":
-                learning_policy["mode"]
-        }
-
-    elif len(anomalies) > 0:
-
-        print(
-            "Problem detected: "
-            "Performance anomaly"
-        )
-
-        print(
-            "\nRecommended action:"
-        )
-
-        print(
-            "ANALYZE_WORKLOAD"
-        )
-
-        return {
-            "action": "ANALYZE_WORKLOAD",
-            "metric_id": None,
-            "query_text": None,
-            "table": None,
-            "column": None,
-            "predicted_latency":
-                predicted_latency,
-            "learning_risk":
-                learning["risk_level"],
-            "learning_policy":
-                learning_policy["mode"]
-        }
-
-    else:
-
-        print(
-            "No significant "
-            "performance problem detected."
-        )
-
-        print(
-            "\nRecommended action:"
-        )
-
-        print(
-            "CONTINUE_MONITORING"
-        )
+    if slow_queries.empty:
+        print("\nNo slow queries detected.")
 
         return {
             "action": "MONITOR",
@@ -530,69 +327,426 @@ def make_decision(
             "query_text": None,
             "table": None,
             "column": None,
-            "predicted_latency":
-                predicted_latency,
-            "learning_risk":
-                learning["risk_level"],
-            "learning_policy":
-                learning_policy["mode"]
+            "filter_column": None,
+            "order_column": None,
+            "order_direction": None,
+            "learning_risk": learning["risk_level"],
+            "learning_policy": "MONITORING",
+            "plan_status": "NORMAL"
         }
 
+    selected = slow_queries.sort_values(
+        "execution_time_ms",
+        ascending=False
+    ).iloc[0]
 
-def main():
+    metric_id = int(selected["metric_id"])
+    query_text = selected["query_text"]
+    execution_time = float(selected["execution_time_ms"])
+
+    print("\nProblem detected: Slow query")
+    print(f"Metric ID: {metric_id}")
+    print(f"Execution time: {execution_time:.3f} ms")
+    print("Query:")
+    print(f"    {query_text}")
+
+    print(
+        "\nRunning query-plan analysis before optimization..."
+    )
+
+    try:
+        plan_result = analyze_query_plan(query_text)
+
+        plan_status = (
+            plan_result.get("status")
+            or plan_result.get("diagnosis")
+            or plan_result.get("query_plan_status")
+            or plan_result.get("plan_status")
+        )
+
+        if isinstance(plan_status, dict):
+            plan_status = (
+                plan_status.get("status")
+                or plan_status.get("type")
+                or plan_status.get("diagnosis")
+            )
+
+        if plan_status is None:
+            plan_status = "UNKNOWN"
+
+        plan_status = str(plan_status).upper()
+
+        plan_recommendation = (
+            plan_result.get("recommended_action")
+            or plan_result.get("recommendation")
+            or plan_result.get("recommended")
+        )
+
+        candidates = plan_result.get(
+            "optimization_candidates",
+            []
+        )
+
+        if candidates is None:
+            candidates = []
+
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+
+            candidate_type = str(
+                candidate.get("type", "")
+            ).upper()
+
+            if candidate_type == "COMPOSITE_INDEX_CANDIDATE":
+                plan_status = "COMPOSITE_INDEX_CANDIDATE"
+
+                if plan_recommendation is None:
+                    plan_recommendation = (
+                        candidate.get(
+                            "recommended_action"
+                        )
+                        or "TEST_COMPOSITE_INDEX"
+                    )
+
+                break
+
+        print(
+            f"\nQuery-plan status: {plan_status}"
+        )
+
+        if plan_recommendation:
+            print(
+                f"Plan recommendation: "
+                f"{plan_recommendation}"
+            )
+
+    except Exception as error:
+        print("\nQuery-plan analysis failed.")
+        print(f"Reason: {error}")
+
+        return {
+            "action": "ANALYZE_WORKLOAD",
+            "metric_id": metric_id,
+            "query_text": query_text,
+            "table": None,
+            "column": None,
+            "filter_column": None,
+            "order_column": None,
+            "order_direction": None,
+            "learning_risk": learning["risk_level"],
+            "learning_policy": "PROTECTIVE",
+            "plan_status": "ANALYSIS_FAILED"
+        }
+
+    policy = determine_optimization_policy(
+        learning["risk_level"],
+        plan_status
+    )
+
+    print(
+        f"\nLearning policy: {policy['policy']}"
+    )
+
+    print(
+        f"Optimization allowed: "
+        f"{'YES' if policy['optimization_allowed'] else 'NO'}"
+    )
+
+    # =========================================================
+    # COMPOSITE INDEX CANDIDATE
+    # =========================================================
+
+    if plan_status == "COMPOSITE_INDEX_CANDIDATE":
+
+        composite_target = extract_composite_index_target(
+            query_text
+        )
+
+        if composite_target is None:
+            print(
+                "\nComposite index candidate detected, "
+                "but the target could not be safely extracted."
+            )
+
+            return {
+                "action": "ANALYZE_WORKLOAD",
+                "metric_id": metric_id,
+                "query_text": query_text,
+                "table": None,
+                "column": None,
+                "filter_column": None,
+                "order_column": None,
+                "order_direction": None,
+                "learning_risk": learning["risk_level"],
+                "learning_policy": policy["policy"],
+                "plan_status": plan_status
+            }
+
+        print(
+            "\nComposite index candidate detected."
+        )
+
+        print(
+            "Target table: "
+            f"{composite_target['table']}"
+        )
+
+        print(
+            "Filter column: "
+            f"{composite_target['filter_column']}"
+        )
+
+        print(
+            "Order column: "
+            f"{composite_target['order_column']}"
+        )
+
+        print(
+            "Order direction: "
+            f"{composite_target['order_direction']}"
+        )
+
+        print(
+            "Suggested index: "
+            f"({composite_target['filter_column']}, "
+            f"{composite_target['order_column']} "
+            f"{composite_target['order_direction']})"
+        )
+
+        if policy["optimization_allowed"]:
+
+            print(
+                "\nDecision: OPTIMIZE_COMPOSITE_INDEX"
+            )
+
+            return {
+                "action": "OPTIMIZE_COMPOSITE_INDEX",
+                "metric_id": metric_id,
+                "query_text": query_text,
+                "table": composite_target["table"],
+                "column": composite_target["filter_column"],
+                "filter_column": composite_target[
+                    "filter_column"
+                ],
+                "order_column": composite_target[
+                    "order_column"
+                ],
+                "order_direction": composite_target[
+                    "order_direction"
+                ],
+                "learning_risk": learning["risk_level"],
+                "learning_policy": policy["policy"],
+                "plan_status": plan_status
+            }
+
+        print(
+            "\nComposite optimization blocked "
+            "by the current learning safety policy."
+        )
+
+        return {
+            "action": "ANALYZE_WORKLOAD",
+            "metric_id": metric_id,
+            "query_text": query_text,
+            "table": composite_target["table"],
+            "column": composite_target["filter_column"],
+            "filter_column": composite_target[
+                "filter_column"
+            ],
+            "order_column": composite_target[
+                "order_column"
+            ],
+            "order_direction": composite_target[
+                "order_direction"
+            ],
+            "learning_risk": learning["risk_level"],
+            "learning_policy": policy["policy"],
+            "plan_status": plan_status
+        }
+
+    # =========================================================
+    # SLOW QUERY WITH EXISTING INDEX
+    # =========================================================
+
+    if plan_status == "SLOW_WITH_INDEX":
+
+        print(
+            "\nDecision: REVIEW_QUERY_AND_RESOURCES"
+        )
+
+        return {
+            "action": "ANALYZE_WORKLOAD",
+            "metric_id": metric_id,
+            "query_text": query_text,
+            "table": None,
+            "column": None,
+            "filter_column": None,
+            "order_column": None,
+            "order_direction": None,
+            "learning_risk": learning["risk_level"],
+            "learning_policy": policy["policy"],
+            "plan_status": plan_status
+        }
+
+    # =========================================================
+    # HEALTHY INDEXED QUERY
+    # =========================================================
+
+    if plan_status == "INDEXED_AND_WITHIN_THRESHOLD":
+
+        print(
+            "\nDecision: MONITOR"
+        )
+
+        return {
+            "action": "MONITOR",
+            "metric_id": metric_id,
+            "query_text": query_text,
+            "table": None,
+            "column": None,
+            "filter_column": None,
+            "order_column": None,
+            "order_direction": None,
+            "learning_risk": learning["risk_level"],
+            "learning_policy": policy["policy"],
+            "plan_status": plan_status
+        }
+
+    # =========================================================
+    # SEQUENTIAL SCAN
+    # =========================================================
+
+    if plan_status == "SEQUENTIAL_SCAN":
+
+        target = extract_query_target(query_text)
+
+        if target is not None and policy["optimization_allowed"]:
+
+            print(
+                "\nDecision: OPTIMIZE_INDEX"
+            )
+
+            return {
+                "action": "OPTIMIZE_INDEX",
+                "metric_id": metric_id,
+                "query_text": query_text,
+                "table": target["table"],
+                "column": target["column"],
+                "filter_column": None,
+                "order_column": None,
+                "order_direction": None,
+                "learning_risk": learning["risk_level"],
+                "learning_policy": policy["policy"],
+                "plan_status": plan_status
+            }
+
+        print(
+            "\nDecision: ANALYZE_WORKLOAD"
+        )
+
+        return {
+            "action": "ANALYZE_WORKLOAD",
+            "metric_id": metric_id,
+            "query_text": query_text,
+            "table": (
+                target["table"]
+                if target is not None
+                else None
+            ),
+            "column": (
+                target["column"]
+                if target is not None
+                else None
+            ),
+            "filter_column": None,
+            "order_column": None,
+            "order_direction": None,
+            "learning_risk": learning["risk_level"],
+            "learning_policy": policy["policy"],
+            "plan_status": plan_status
+        }
+
+    # =========================================================
+    # FALLBACK
+    # =========================================================
+
+    print(
+        "\nDecision: ANALYZE_WORKLOAD"
+    )
+
+    return {
+        "action": "ANALYZE_WORKLOAD",
+        "metric_id": metric_id,
+        "query_text": query_text,
+        "table": None,
+        "column": None,
+        "filter_column": None,
+        "order_column": None,
+        "order_direction": None,
+        "learning_risk": learning["risk_level"],
+        "learning_policy": policy["policy"],
+        "plan_status": plan_status
+    }
+
+
+if __name__ == "__main__":
 
     df = load_metrics()
 
     if len(df) < 10:
 
         print(
-            "Not enough performance data."
-        )
-
-        print(
+            f"Not enough performance data. "
             f"Available records: {len(df)}"
         )
 
-        return
+    else:
 
-    df["is_anomaly"] = (
-        detect_anomalies(df)
-    )
+        df["is_anomaly"] = detect_anomalies(df)
 
-    analysis = analyze_workload(df)
+        analysis = analyze_workload(df)
 
-    decision = make_decision(
-        analysis,
-        predicted_latency=None
-    )
-
-    print(
-        "\n===== FINAL SYSTEM DECISION ====="
-    )
-
-    print(
-        f"Decision: "
-        f"{decision['action']}"
-    )
-
-    print(
-        f"Learning risk: "
-        f"{decision['learning_risk']}"
-    )
-
-    print(
-        f"Learning policy: "
-        f"{decision['learning_policy']}"
-    )
-
-    if decision["table"] is not None:
-
-        print(
-            f"Optimization target: "
-            f"{decision['table']}."
-            f"{decision['column']}"
+        decision = make_decision(
+            analysis
         )
 
+        print("\nDecision:")
+        print(
+            f"Action: {decision['action']}"
+        )
 
-if __name__ == "__main__":
-    main()
+        print(
+            f"Learning risk: "
+            f"{decision['learning_risk']}"
+        )
+
+        print(
+            f"Learning policy: "
+            f"{decision['learning_policy']}"
+        )
+
+        print(
+            f"Plan status: "
+            f"{decision['plan_status']}"
+        )
+
+        if decision["table"] is not None:
+
+            if decision["order_column"] is not None:
+
+                print(
+                    "Target: "
+                    f"{decision['table']}."
+                    f"{decision['filter_column']}, "
+                    f"{decision['order_column']} "
+                    f"{decision['order_direction']}"
+                )
+
+            else:
+
+                print(
+                    "Target: "
+                    f"{decision['table']}."
+                    f"{decision['column']}"
+                )
