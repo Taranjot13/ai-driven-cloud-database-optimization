@@ -1,12 +1,12 @@
 import re
 
 import pandas as pd
-
 from sqlalchemy import create_engine
-
 from sklearn.ensemble import IsolationForest
 
 from scripts.query_plan_analyzer import analyze_query_plan
+from scripts.resource_optimizer import run_resource_optimization
+from scripts.cost_optimizer import run_cost_optimization
 
 
 DB_CONFIG = {
@@ -14,7 +14,7 @@ DB_CONFIG = {
     "port": 5432,
     "database": "cloud_optimizer",
     "user": "postgres",
-    "password": "123456t"
+    "password": "123456t"  # Replace with your actual PostgreSQL password   
 }
 
 
@@ -22,14 +22,16 @@ SLOW_QUERY_THRESHOLD_MS = 5.0
 
 
 def get_engine():
-    connection_url = (
+    database_url = (
         f"postgresql+psycopg2://"
-        f"{DB_CONFIG['user']}:{DB_CONFIG['password']}"
-        f"@{DB_CONFIG['host']}:{DB_CONFIG['port']}"
-        f"/{DB_CONFIG['database']}"
+        f"{DB_CONFIG['user']}:"
+        f"{DB_CONFIG['password']}@"
+        f"{DB_CONFIG['host']}:"
+        f"{DB_CONFIG['port']}/"
+        f"{DB_CONFIG['database']}"
     )
 
-    return create_engine(connection_url)
+    return create_engine(database_url)
 
 
 def load_metrics():
@@ -46,22 +48,20 @@ def load_metrics():
         ORDER BY recorded_at;
     """
 
-    df = pd.read_sql_query(
-        query,
-        engine
-    )
-
-    engine.dispose()
-
-    return df
+    try:
+        return pd.read_sql_query(query, engine)
+    finally:
+        engine.dispose()
 
 
 def detect_anomalies(df):
-    result = df.copy()
+    if len(df) < 10:
+        result = df.copy()
+        result["anomaly"] = 1
+        result["status"] = "Normal"
+        return result
 
-    if len(result) < 10:
-        result["is_anomaly"] = False
-        return result["is_anomaly"]
+    result = df.copy()
 
     features = result[
         [
@@ -75,268 +75,232 @@ def detect_anomalies(df):
         random_state=42
     )
 
-    predictions = model.fit_predict(
-        features
+    result["anomaly"] = model.fit_predict(features)
+
+    result["status"] = result["anomaly"].map(
+        {
+            1: "Normal",
+            -1: "Anomaly"
+        }
     )
 
-    result["is_anomaly"] = (
-        predictions == -1
-    )
-
-    return result["is_anomaly"]
+    return result
 
 
 def analyze_workload(df):
-    average_latency = (
+    if df.empty:
+        return {
+            "average_latency": 0.0,
+            "latest_latency": 0.0,
+            "maximum_latency": 0.0,
+            "slow_queries": 0,
+            "latest_metric_id": None,
+            "latest_query": None
+        }
+
+    average_latency = float(
         df["execution_time_ms"].mean()
     )
 
-    latest_latency = (
-        df.iloc[-1]["execution_time_ms"]
+    latest_row = df.iloc[-1]
+
+    latest_latency = float(
+        latest_row["execution_time_ms"]
     )
 
-    slow_queries = df[
-        df["execution_time_ms"]
-        > SLOW_QUERY_THRESHOLD_MS
-    ].copy()
+    maximum_latency = float(
+        df["execution_time_ms"].max()
+    )
+
+    slow_queries = int(
+        (
+            df["execution_time_ms"]
+            > SLOW_QUERY_THRESHOLD_MS
+        ).sum()
+    )
 
     return {
         "average_latency": average_latency,
         "latest_latency": latest_latency,
-        "slow_queries": slow_queries
+        "maximum_latency": maximum_latency,
+        "slow_queries": slow_queries,
+        "latest_metric_id": int(
+            latest_row["metric_id"]
+        ),
+        "latest_query": str(
+            latest_row["query_text"]
+        )
     }
 
 
 def extract_query_target(query_text):
     if not query_text:
-        return None
+        return {
+            "table_name": None,
+            "column_name": None,
+            "order_column": None,
+            "order_direction": None
+        }
 
     table_match = re.search(
-        r"\bFROM\s+"
-        r"([a-zA-Z_][a-zA-Z0-9_]*)"
-        r"(?:\s+[a-zA-Z_][a-zA-Z0-9_]*)?",
+        r"FROM\s+([a-zA-Z_][a-zA-Z0-9_]*)",
         query_text,
         re.IGNORECASE
     )
 
     column_match = re.search(
-        r"\bWHERE\s+"
-        r"(?:[a-zA-Z_][a-zA-Z0-9_]*\.)?"
-        r"([a-zA-Z_][a-zA-Z0-9_]*)\s*=",
-        query_text,
-        re.IGNORECASE
-    )
-
-    if not table_match or not column_match:
-        return None
-
-    return {
-        "table": table_match.group(1),
-        "column": column_match.group(1)
-    }
-
-
-def extract_composite_index_target(query_text):
-    """
-    Supports both:
-
-        WHERE customer_id = ...
-        ORDER BY order_date DESC
-
-    and:
-
-        WHERE o.customer_id = ...
-        ORDER BY o.order_date DESC
-    """
-
-    if not query_text:
-        return None
-
-    table_match = re.search(
-        r"\bFROM\s+"
-        r"([a-zA-Z_][a-zA-Z0-9_]*)"
-        r"(?:\s+([a-zA-Z_][a-zA-Z0-9_]*))?",
-        query_text,
-        re.IGNORECASE
-    )
-
-    filter_match = re.search(
-        r"\bWHERE\s+"
-        r"(?:[a-zA-Z_][a-zA-Z0-9_]*\.)?"
-        r"([a-zA-Z_][a-zA-Z0-9_]*)\s*=",
+        r"WHERE\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=",
         query_text,
         re.IGNORECASE
     )
 
     order_match = re.search(
-        r"\bORDER\s+BY\s+"
-        r"(?:[a-zA-Z_][a-zA-Z0-9_]*\.)?"
-        r"([a-zA-Z_][a-zA-Z0-9_]*)"
-        r"(?:\s+(ASC|DESC))?",
+        r"ORDER\s+BY\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+(ASC|DESC))?",
         query_text,
         re.IGNORECASE
     )
 
+    return {
+        "table_name": (
+            table_match.group(1)
+            if table_match
+            else None
+        ),
+        "column_name": (
+            column_match.group(1)
+            if column_match
+            else None
+        ),
+        "order_column": (
+            order_match.group(1)
+            if order_match
+            else None
+        ),
+        "order_direction": (
+            order_match.group(2).upper()
+            if order_match and order_match.group(2)
+            else None
+        )
+    }
+
+
+def extract_composite_index_target(query_text):
+    target = extract_query_target(query_text)
+
     if (
-        not table_match
-        or not filter_match
-        or not order_match
+        target["table_name"]
+        and target["column_name"]
+        and target["order_column"]
     ):
-        return None
-
-    order_direction = (
-        order_match.group(2)
-    )
-
-    if order_direction is None:
-        order_direction = "ASC"
+        return target
 
     return {
-        "table": table_match.group(1),
-        "filter_column": filter_match.group(1),
-        "order_column": order_match.group(1),
-        "order_direction": order_direction.upper()
+        "table_name": None,
+        "column_name": None,
+        "order_column": None,
+        "order_direction": None
     }
 
 
 def calculate_learning_risk():
-    engine = get_engine()
+    try:
+        engine = get_engine()
 
-    query = """
-        SELECT
-            optimization_type,
-            decision,
-            improvement_percent
-        FROM optimization_history
-        ORDER BY created_at;
-    """
+        query = """
+            SELECT
+                COUNT(*) AS total_attempts,
+                COUNT(*) FILTER (
+                    WHERE decision IN (
+                        'KEEP',
+                        'EXISTING INDEX VERIFIED'
+                    )
+                ) AS successful,
+                COUNT(*) FILTER (
+                    WHERE decision = 'ROLLBACK'
+                ) AS rollbacks
+            FROM optimization_history;
+        """
 
-    history = pd.read_sql_query(
-        query,
-        engine
-    )
+        try:
+            df = pd.read_sql_query(query, engine)
+        finally:
+            engine.dispose()
 
-    engine.dispose()
+        if df.empty:
+            return {
+                "total_attempts": 0,
+                "successful": 0,
+                "rollbacks": 0,
+                "success_rate": 0.0,
+                "risk_level": "LOW"
+            }
 
-    if history.empty:
-        return {
-            "risk_level": "INSUFFICIENT_DATA",
-            "success_rate": 0.0,
-            "total_attempts": 0,
-            "successful_optimizations": 0,
-            "rollbacks": 0,
-            "average_improvement": 0.0
-        }
-
-    optimization_decisions = history[
-        history["decision"].isin(
-            [
-                "KEEP INDEX",
-                "ROLLBACK"
-            ]
+        total_attempts = int(
+            df.iloc[0]["total_attempts"] or 0
         )
-    ]
 
-    total_attempts = len(
-        optimization_decisions
-    )
+        successful = int(
+            df.iloc[0]["successful"] or 0
+        )
 
-    successful_optimizations = len(
-        optimization_decisions[
-            optimization_decisions["decision"]
-            == "KEEP INDEX"
-        ]
-    )
+        rollbacks = int(
+            df.iloc[0]["rollbacks"] or 0
+        )
 
-    rollbacks = len(
-        optimization_decisions[
-            optimization_decisions["decision"]
-            == "ROLLBACK"
-        ]
-    )
+        if total_attempts == 0:
+            success_rate = 0.0
+        else:
+            success_rate = (
+                successful / total_attempts
+            ) * 100
 
-    if total_attempts == 0:
+        if success_rate >= 80:
+            risk_level = "LOW"
+        elif success_rate >= 50:
+            risk_level = "MEDIUM"
+        else:
+            risk_level = "HIGH"
+
         return {
-            "risk_level": "INSUFFICIENT_DATA",
-            "success_rate": 0.0,
-            "total_attempts": 0,
-            "successful_optimizations": 0,
-            "rollbacks": 0,
-            "average_improvement": 0.0
+            "total_attempts": total_attempts,
+            "successful": successful,
+            "rollbacks": rollbacks,
+            "success_rate": success_rate,
+            "risk_level": risk_level
         }
 
-    success_rate = (
-        successful_optimizations
-        / total_attempts
-    ) * 100
-
-    average_improvement = (
-        optimization_decisions[
-            "improvement_percent"
-        ]
-        .dropna()
-        .mean()
-    )
-
-    if pd.isna(average_improvement):
-        average_improvement = 0.0
-
-    if total_attempts < 3:
-        risk_level = "INSUFFICIENT_DATA"
-
-    elif success_rate >= 80:
-        risk_level = "LOW"
-
-    elif success_rate >= 50:
-        risk_level = "MEDIUM"
-
-    else:
-        risk_level = "HIGH"
-
-    return {
-        "risk_level": risk_level,
-        "success_rate": success_rate,
-        "total_attempts": total_attempts,
-        "successful_optimizations":
-            successful_optimizations,
-        "rollbacks": rollbacks,
-        "average_improvement":
-            average_improvement
-    }
+    except Exception:
+        return {
+            "total_attempts": 0,
+            "successful": 0,
+            "rollbacks": 0,
+            "success_rate": 0.0,
+            "risk_level": "UNKNOWN"
+        }
 
 
 def determine_optimization_policy(
     learning_risk,
-    plan_diagnosis=None
+    plan_diagnosis=None,
+    resource_status="HEALTHY",
+    cost_status="COST_EFFICIENT"
 ):
-    if plan_diagnosis == "SLOW_WITH_INDEX":
+    if resource_status == "CRITICAL":
         return {
-            "policy": "PROTECTIVE",
+            "policy": "RESOURCE_PROTECTIVE",
             "optimization_allowed": False
         }
 
-    if plan_diagnosis == "INDEXED_AND_WITHIN_THRESHOLD":
+    if cost_status == "HIGH_COST_RISK":
         return {
-            "policy": "MONITORING",
+            "policy": "COST_PROTECTIVE",
             "optimization_allowed": False
         }
 
-    if plan_diagnosis == "EXISTING_COMPOSITE_INDEX":
+    if learning_risk == "HIGH":
         return {
-            "policy": "VERIFICATION",
+            "policy": "CONSERVATIVE",
             "optimization_allowed": False
-        }
-
-    if plan_diagnosis == "REVIEW_QUERY_AND_RESOURCES":
-        return {
-            "policy": "PROTECTIVE",
-            "optimization_allowed": False
-        }
-
-    if learning_risk == "LOW":
-        return {
-            "policy": "AUTONOMOUS",
-            "optimization_allowed": True
         }
 
     if learning_risk == "MEDIUM":
@@ -345,51 +309,105 @@ def determine_optimization_policy(
             "optimization_allowed": True
         }
 
-    if learning_risk == "INSUFFICIENT_DATA":
+    if plan_diagnosis == "SLOW_WITH_INDEX":
         return {
-            "policy": "EXPLORATORY",
+            "policy": "PERFORMANCE_REVIEW",
             "optimization_allowed": True
         }
 
     return {
-        "policy": "PROTECTIVE",
-        "optimization_allowed": False
+        "policy": "NORMAL",
+        "optimization_allowed": True
     }
 
 
 def build_decision_result(
     action,
-    metric_id,
-    query_text,
-    table=None,
-    column=None,
-    filter_column=None,
-    order_column=None,
-    order_direction=None,
-    learning=None,
-    policy=None,
-    plan_status="UNKNOWN"
+    learning,
+    policy,
+    plan_diagnosis,
+    plan_recommendation,
+    resource_result,
+    cost_result,
+    target
 ):
     return {
         "action": action,
-        "metric_id": metric_id,
-        "query_text": query_text,
-        "table": table,
-        "column": column,
-        "filter_column": filter_column,
-        "order_column": order_column,
-        "order_direction": order_direction,
-        "learning_risk": (
-            learning["risk_level"]
-            if learning
-            else "UNKNOWN"
-        ),
-        "learning_policy": (
-            policy["policy"]
-            if policy
-            else "UNKNOWN"
-        ),
-        "plan_status": plan_status
+
+        "learning_risk": learning["risk_level"],
+
+        "learning_policy": policy["policy"],
+
+        "optimization_allowed": policy[
+            "optimization_allowed"
+        ],
+
+        "plan_status": plan_diagnosis,
+
+        "plan_recommendation": plan_recommendation,
+
+        "resource_status": resource_result[
+            "status"
+        ],
+
+        "resource_recommendations": resource_result[
+            "recommendations"
+        ],
+
+        "resource_metrics": {
+            "connection_utilization":
+                resource_result[
+                    "connection_utilization"
+                ],
+
+            "cache_hit_ratio":
+                resource_result[
+                    "cache_hit_ratio"
+                ],
+
+            "rollback_rate":
+                resource_result[
+                    "rollback_rate"
+                ],
+
+            "database_size_gb":
+                resource_result[
+                    "database_size_gb"
+                ]
+        },
+
+        "cost_status": cost_result[
+            "status"
+        ],
+
+        "cost_metrics": {
+            "estimated_monthly_cost":
+                cost_result[
+                    "estimated_monthly_cost"
+                ],
+
+            "compute_cost":
+                cost_result[
+                    "compute_cost"
+                ],
+
+            "storage_cost":
+                cost_result[
+                    "storage_cost"
+                ],
+
+            "connection_cost":
+                cost_result[
+                    "connection_cost"
+                ]
+        },
+
+        "cost_recommendations":
+            cost_result[
+                "recommendations"
+            ],
+
+        "target": target
     }
 
 
@@ -397,11 +415,19 @@ def make_decision(
     analysis,
     predicted_latency=None
 ):
-    slow_queries = analysis[
-        "slow_queries"
+    learning = calculate_learning_risk()
+
+    resource_result = run_resource_optimization()
+
+    resource_status = resource_result[
+        "status"
     ]
 
-    learning = calculate_learning_risk()
+    cost_result = run_cost_optimization()
+
+    cost_status = cost_result[
+        "status"
+    ]
 
     print(
         f"\nHistorical optimization success: "
@@ -413,203 +439,154 @@ def make_decision(
         f"{learning['risk_level']}"
     )
 
-    if slow_queries.empty:
+    print("\n===== RESOURCE HEALTH =====")
+
+    print(
+        f"Resource status: "
+        f"{resource_status}"
+    )
+
+    print(
+        f"Connection utilization: "
+        f"{resource_result['connection_utilization']:.2f}%"
+    )
+
+    print(
+        f"Cache hit ratio: "
+        f"{resource_result['cache_hit_ratio']:.2f}%"
+    )
+
+    print(
+        f"Rollback rate: "
+        f"{resource_result['rollback_rate']:.2f}%"
+    )
+
+    print(
+        f"Database size: "
+        f"{resource_result['database_size_gb']:.4f} GB"
+    )
+
+    print("\nResource recommendations:")
+
+    for recommendation in resource_result[
+        "recommendations"
+    ]:
+        print(f"- {recommendation}")
+
+    print("\n===== COST HEALTH =====")
+
+    print(
+        f"Cost status: "
+        f"{cost_status}"
+    )
+
+    print(
+        f"Estimated monthly cost: "
+        f"${cost_result['estimated_monthly_cost']:.2f}"
+    )
+
+    print(
+        f"Compute cost: "
+        f"${cost_result['compute_cost']:.2f}"
+    )
+
+    print(
+        f"Storage cost: "
+        f"${cost_result['storage_cost']:.2f}"
+    )
+
+    print(
+        f"Connection cost: "
+        f"${cost_result['connection_cost']:.2f}"
+    )
+
+    print("\nCost recommendations:")
+
+    for recommendation in cost_result[
+        "recommendations"
+    ]:
+        print(f"- {recommendation}")
+
+    target = extract_query_target(
+        analysis.get("latest_query")
+    )
+
+    plan_diagnosis = None
+    plan_recommendation = None
+
+    latest_latency = analysis.get(
+        "latest_latency",
+        0.0
+    )
+
+    latest_query = analysis.get(
+        "latest_query"
+    )
+
+    if latest_latency > SLOW_QUERY_THRESHOLD_MS:
+
         print(
-            "\nNo slow queries detected."
+            "\nProblem detected: Slow query"
         )
 
-        return build_decision_result(
-            action="MONITOR",
-            metric_id=None,
-            query_text=None,
-            learning=learning,
-            policy={
-                "policy": "MONITORING"
-            },
-            plan_status="NORMAL"
+        print(
+            f"Metric ID: "
+            f"{analysis.get('latest_metric_id')}"
         )
 
-    selected = slow_queries.sort_values(
-        "execution_time_ms",
-        ascending=False
-    ).iloc[0]
-
-    metric_id = int(
-        selected["metric_id"]
-    )
-
-    query_text = selected[
-        "query_text"
-    ]
-
-    execution_time = float(
-        selected["execution_time_ms"]
-    )
-
-    print(
-        "\nProblem detected: Slow query"
-    )
-
-    print(
-        f"Metric ID: {metric_id}"
-    )
-
-    print(
-        f"Execution time: "
-        f"{execution_time:.3f} ms"
-    )
-
-    print(
-        "Query:"
-    )
-
-    print(
-        f"    {query_text}"
-    )
-
-    print(
-        "\nRunning query-plan analysis "
-        "before optimization..."
-    )
-
-    try:
-        plan_result = analyze_query_plan(
-            query_text
+        print(
+            f"Execution time: "
+            f"{latest_latency:.3f} ms"
         )
 
-        diagnosis = plan_result.get(
-            "diagnosis",
-            {}
+        print(
+            f"Query:\n\n"
+            f"{latest_query}"
         )
 
-        plan_status = (
-            diagnosis.get("status")
-            if isinstance(
-                diagnosis,
-                dict
-            )
-            else None
-        )
+        if latest_query:
 
-        if plan_status is None:
-            plan_status = (
-                plan_result.get(
-                    "status"
-                )
+            print(
+                "\nRunning query-plan analysis "
+                "before optimization..."
             )
 
-        if plan_status is None:
-            plan_status = "UNKNOWN"
-
-        plan_status = str(
-            plan_status
-        ).upper()
-
-        plan_recommendation = (
-            diagnosis.get(
-                "recommended_action"
-            )
-            if isinstance(
-                diagnosis,
-                dict
-            )
-            else None
-        )
-
-        if plan_recommendation is None:
-            plan_recommendation = (
-                plan_result.get(
-                    "recommended_action"
-                )
-            )
-
-        candidates = plan_result.get(
-            "optimization_candidates",
-            []
-        )
-
-        if candidates is None:
-            candidates = []
-
-        for candidate in candidates:
-
-            if not isinstance(
-                candidate,
-                dict
-            ):
-                continue
-
-            candidate_type = str(
-                candidate.get(
-                    "type",
-                    ""
-                )
-            ).upper()
-
-            if (
-                candidate_type
-                == "EXISTING_COMPOSITE_INDEX"
-            ):
-                plan_status = (
-                    "EXISTING_COMPOSITE_INDEX"
+            try:
+                plan_result = analyze_query_plan(
+                    latest_query
                 )
 
-                plan_recommendation = (
-                    "VERIFY_EXISTING_COMPOSITE_INDEX"
-                )
+                if isinstance(plan_result, dict):
 
-                break
-
-            if (
-                candidate_type
-                == "COMPOSITE_INDEX_CANDIDATE"
-            ):
-                plan_status = (
-                    "COMPOSITE_INDEX_CANDIDATE"
-                )
-
-                if plan_recommendation is None:
-                    plan_recommendation = (
-                        "TEST_COMPOSITE_INDEX"
+                    plan_diagnosis = plan_result.get(
+                        "status"
                     )
 
-                break
+                    plan_recommendation = (
+                        plan_result.get(
+                            "recommended_action"
+                        )
+                    )
 
-        print(
-            f"\nQuery-plan status: "
-            f"{plan_status}"
-        )
+                    if not plan_recommendation:
+                        plan_recommendation = (
+                            plan_result.get(
+                                "recommendation"
+                            )
+                        )
 
-        if plan_recommendation:
-            print(
-                f"Plan recommendation: "
-                f"{plan_recommendation}"
-            )
+            except Exception as error:
+                print(
+                    "\nQuery-plan analysis failed:"
+                )
 
-    except Exception as error:
-
-        print(
-            "\nQuery-plan analysis failed."
-        )
-
-        print(
-            f"Reason: {error}"
-        )
-
-        return build_decision_result(
-            action="ANALYZE_WORKLOAD",
-            metric_id=metric_id,
-            query_text=query_text,
-            learning=learning,
-            policy={
-                "policy": "PROTECTIVE"
-            },
-            plan_status="ANALYSIS_FAILED"
-        )
+                print(error)
 
     policy = determine_optimization_policy(
         learning["risk_level"],
-        plan_status
+        plan_diagnosis,
+        resource_status,
+        cost_status
     )
 
     print(
@@ -622,323 +599,191 @@ def make_decision(
         f"{'YES' if policy['optimization_allowed'] else 'NO'}"
     )
 
-    # =========================================================
-    # EXISTING COMPOSITE INDEX
-    # =========================================================
+    action = "MONITOR"
 
-    if (
-        plan_status
-        == "EXISTING_COMPOSITE_INDEX"
-    ):
-        composite_target = (
-            extract_composite_index_target(
-                query_text
-            )
+    if resource_status == "CRITICAL":
+
+        action = "RESOURCE_PROTECTION"
+
+        print(
+            "\nCritical resource pressure detected."
         )
 
-        if composite_target is None:
+        print(
+            "Optimization blocked until resource "
+            "health improves."
+        )
 
-            print(
-                "\nExisting composite index detected, "
-                "but the target could not be safely "
-                "extracted."
-            )
+    elif cost_status == "HIGH_COST_RISK":
 
-            return build_decision_result(
-                action="ANALYZE_WORKLOAD",
-                metric_id=metric_id,
-                query_text=query_text,
-                learning=learning,
-                policy=policy,
-                plan_status=plan_status
-            )
+        action = "COST_PROTECTION"
+
+        print(
+            "\nHigh cost risk detected."
+        )
+
+        print(
+            "Optimization blocked by cost-protection policy."
+        )
+
+    elif latest_latency <= SLOW_QUERY_THRESHOLD_MS:
+
+        action = "MONITOR"
+
+        print(
+            "\nQuery is currently within "
+            "the performance threshold."
+        )
+
+        print(
+            "Decision: MONITOR"
+        )
+
+    elif plan_diagnosis == "EXISTING_COMPOSITE_INDEX":
+
+        action = (
+            "VERIFY_EXISTING_COMPOSITE_INDEX"
+        )
 
         print(
             "\nExisting composite index detected."
         )
 
         print(
-            "Target table: "
-            f"{composite_target['table']}"
-        )
-
-        print(
-            "Filter column: "
-            f"{composite_target['filter_column']}"
-        )
-
-        print(
-            "Order column: "
-            f"{composite_target['order_column']}"
-        )
-
-        print(
-            "Order direction: "
-            f"{composite_target['order_direction']}"
-        )
-
-        print(
-            "\nDecision: "
+            "Decision: "
             "VERIFY_EXISTING_COMPOSITE_INDEX"
         )
 
-        return build_decision_result(
-            action="VERIFY_EXISTING_COMPOSITE_INDEX",
-            metric_id=metric_id,
-            query_text=query_text,
-            table=composite_target[
-                "table"
-            ],
-            column=composite_target[
-                "filter_column"
-            ],
-            filter_column=composite_target[
-                "filter_column"
-            ],
-            order_column=composite_target[
-                "order_column"
-            ],
-            order_direction=composite_target[
-                "order_direction"
-            ],
-            learning=learning,
-            policy=policy,
-            plan_status=plan_status
-        )
-
-    # =========================================================
-    # COMPOSITE INDEX CANDIDATE
-    # =========================================================
-
-    if (
-        plan_status
-        == "COMPOSITE_INDEX_CANDIDATE"
+    elif (
+        plan_diagnosis == "SLOW_WITH_INDEX"
     ):
 
-        composite_target = (
-            extract_composite_index_target(
-                query_text
-            )
-        )
-
-        if composite_target is None:
-
-            print(
-                "\nComposite index candidate detected, "
-                "but the target could not be safely "
-                "extracted."
-            )
-
-            return build_decision_result(
-                action="ANALYZE_WORKLOAD",
-                metric_id=metric_id,
-                query_text=query_text,
-                learning=learning,
-                policy=policy,
-                plan_status=plan_status
-            )
+        action = "ANALYZE_WORKLOAD"
 
         print(
-            "\nComposite index candidate detected."
+            "\nQuery is using an index but "
+            "remains slow."
         )
 
         print(
-            "Target table: "
-            f"{composite_target['table']}"
+            "Decision: ANALYZE_WORKLOAD"
         )
 
-        print(
-            "Filter column: "
-            f"{composite_target['filter_column']}"
-        )
-
-        print(
-            "Order column: "
-            f"{composite_target['order_column']}"
-        )
-
-        print(
-            "Order direction: "
-            f"{composite_target['order_direction']}"
-        )
-
-        print(
-            "Suggested index: "
-            f"({composite_target['filter_column']}, "
-            f"{composite_target['order_column']} "
-            f"{composite_target['order_direction']})"
-        )
-
-        if policy["optimization_allowed"]:
-
-            print(
-                "\nDecision: "
-                "OPTIMIZE_COMPOSITE_INDEX"
-            )
-
-            return build_decision_result(
-                action="OPTIMIZE_COMPOSITE_INDEX",
-                metric_id=metric_id,
-                query_text=query_text,
-                table=composite_target[
-                    "table"
-                ],
-                column=composite_target[
-                    "filter_column"
-                ],
-                filter_column=composite_target[
-                    "filter_column"
-                ],
-                order_column=composite_target[
-                    "order_column"
-                ],
-                order_direction=composite_target[
-                    "order_direction"
-                ],
-                learning=learning,
-                policy=policy,
-                plan_status=plan_status
-            )
-
-        print(
-            "\nComposite optimization blocked "
-            "by the current learning safety policy."
-        )
-
-        return build_decision_result(
-            action="ANALYZE_WORKLOAD",
-            metric_id=metric_id,
-            query_text=query_text,
-            table=composite_target[
-                "table"
-            ],
-            column=composite_target[
-                "filter_column"
-            ],
-            filter_column=composite_target[
-                "filter_column"
-            ],
-            order_column=composite_target[
-                "order_column"
-            ],
-            order_direction=composite_target[
-                "order_direction"
-            ],
-            learning=learning,
-            policy=policy,
-            plan_status=plan_status
-        )
-
-    # =========================================================
-    # SLOW QUERY WITH EXISTING INDEX
-    # =========================================================
-
-    if plan_status == "SLOW_WITH_INDEX":
-
-        print(
-            "\nDecision: "
-            "REVIEW_QUERY_AND_RESOURCES"
-        )
-
-        return build_decision_result(
-            action="ANALYZE_WORKLOAD",
-            metric_id=metric_id,
-            query_text=query_text,
-            learning=learning,
-            policy=policy,
-            plan_status=plan_status
-        )
-
-    # =========================================================
-    # HEALTHY INDEXED QUERY
-    # =========================================================
-
-    if (
-        plan_status
-        == "INDEXED_AND_WITHIN_THRESHOLD"
+    elif (
+        plan_diagnosis == "INDEXED_AND_WITHIN_THRESHOLD"
     ):
 
+        action = "MONITOR"
+
         print(
-            "\nDecision: MONITOR"
+            "\nQuery is already indexed "
+            "and within threshold."
         )
 
-        return build_decision_result(
-            action="MONITOR",
-            metric_id=metric_id,
-            query_text=query_text,
-            learning=learning,
-            policy=policy,
-            plan_status=plan_status
+        print(
+            "Decision: MONITOR"
         )
 
-    # =========================================================
-    # SEQUENTIAL SCAN
-    # =========================================================
+    elif (
+        plan_diagnosis == "COMPOSITE_INDEX_CANDIDATE"
+        and policy["optimization_allowed"]
+    ):
 
-    if plan_status == "SEQUENTIAL_SCAN":
-
-        target = extract_query_target(
-            query_text
+        target = extract_composite_index_target(
+            latest_query
         )
 
         if (
-            target is not None
-            and policy["optimization_allowed"]
+            target["table_name"]
+            and target["column_name"]
+            and target["order_column"]
         ):
+            action = (
+                "OPTIMIZE_COMPOSITE_INDEX"
+            )
 
             print(
-                "\nDecision: OPTIMIZE_INDEX"
+                "\nComposite index candidate detected."
             )
 
-            return build_decision_result(
-                action="OPTIMIZE_INDEX",
-                metric_id=metric_id,
-                query_text=query_text,
-                table=target["table"],
-                column=target["column"],
-                learning=learning,
-                policy=policy,
-                plan_status=plan_status
+            print(
+                "Decision: "
+                "OPTIMIZE_COMPOSITE_INDEX"
             )
+
+        else:
+            action = "ANALYZE_WORKLOAD"
+
+    elif (
+        plan_recommendation == "OPTIMIZE_INDEX"
+        and policy["optimization_allowed"]
+    ):
+
+        action = "OPTIMIZE_INDEX"
 
         print(
-            "\nDecision: ANALYZE_WORKLOAD"
+            "\nSingle-column index optimization "
+            "recommended."
         )
 
-        return build_decision_result(
-            action="ANALYZE_WORKLOAD",
-            metric_id=metric_id,
-            query_text=query_text,
-            table=(
-                target["table"]
-                if target is not None
-                else None
-            ),
-            column=(
-                target["column"]
-                if target is not None
-                else None
-            ),
-            learning=learning,
-            policy=policy,
-            plan_status=plan_status
+        print(
+            "Decision: OPTIMIZE_INDEX"
         )
 
-    # =========================================================
-    # FALLBACK
-    # =========================================================
+    elif (
+        plan_recommendation
+        == "OPTIMIZE_COMPOSITE_INDEX"
+        and policy["optimization_allowed"]
+    ):
 
-    print(
-        "\nDecision: ANALYZE_WORKLOAD"
-    )
+        action = (
+            "OPTIMIZE_COMPOSITE_INDEX"
+        )
+
+        print(
+            "\nComposite index optimization "
+            "recommended."
+        )
+
+        print(
+            "Decision: "
+            "OPTIMIZE_COMPOSITE_INDEX"
+        )
+
+    elif latest_latency > SLOW_QUERY_THRESHOLD_MS:
+
+        action = "ANALYZE_WORKLOAD"
+
+        print(
+            "\nSlow query detected, but no safe "
+            "automatic modification was identified."
+        )
+
+        print(
+            "Decision: ANALYZE_WORKLOAD"
+        )
+
+    else:
+
+        action = "MONITOR"
+
+        print(
+            "\nNo optimization required."
+        )
+
+        print(
+            "Decision: MONITOR"
+        )
 
     return build_decision_result(
-        action="ANALYZE_WORKLOAD",
-        metric_id=metric_id,
-        query_text=query_text,
+        action=action,
         learning=learning,
         policy=policy,
-        plan_status=plan_status
+        plan_diagnosis=plan_diagnosis,
+        plan_recommendation=plan_recommendation,
+        resource_result=resource_result,
+        cost_result=cost_result,
+        target=target
     )
 
 
@@ -946,29 +791,22 @@ if __name__ == "__main__":
 
     df = load_metrics()
 
-    if len(df) < 10:
+    if df.empty:
 
         print(
-            f"Not enough performance data. "
-            f"Available records: {len(df)}"
+            "No performance metrics available."
         )
 
     else:
 
-        df["is_anomaly"] = (
-            detect_anomalies(df)
-        )
-
-        analysis = analyze_workload(
-            df
-        )
+        analysis = analyze_workload(df)
 
         decision = make_decision(
             analysis
         )
 
         print(
-            "\nDecision:"
+            "\n===== FINAL DECISION ====="
         )
 
         print(
@@ -991,22 +829,17 @@ if __name__ == "__main__":
             f"{decision['plan_status']}"
         )
 
-        if decision["table"] is not None:
+        print(
+            f"Resource status: "
+            f"{decision['resource_status']}"
+        )
 
-            if decision["order_column"] is not None:
+        print(
+            f"Cost status: "
+            f"{decision['cost_status']}"
+        )
 
-                print(
-                    "Target: "
-                    f"{decision['table']}."
-                    f"{decision['filter_column']}, "
-                    f"{decision['order_column']} "
-                    f"{decision['order_direction']}"
-                )
-
-            else:
-
-                print(
-                    "Target: "
-                    f"{decision['table']}."
-                    f"{decision['column']}"
-                )
+        print(
+            f"Estimated monthly cost: "
+            f"${decision['cost_metrics']['estimated_monthly_cost']:.2f}"
+        )

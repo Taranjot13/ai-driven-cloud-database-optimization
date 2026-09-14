@@ -118,45 +118,16 @@ A Python and PostgreSQL prototype that measures query performance, detects anoma
 
 ## Project Structure
 
-```text
-ai-driven-cloud-database-optimization/
-├── database/                         Database assets (currently empty)
-├── docs/                             Project documentation (currently empty)
-├── psql queries/                     Example SQL workloads
-│   ├── q1.sql
-│   ├── q2.sql
-│   ├── q3.sql
-│   ├── q4.sql
-│   ├── q5.sql
-│   └── q6.sql
-├── scripts/                          Database analysis and optimization tools
-│   ├── analyze_query.py              Analyze SQL query performance
-│   ├── anomaly_detection.py          Detect anomalous metrics
-│   ├── autonomous_optimizer.py       Apply and verify index changes
-│   ├── composite_index_optimizer.py  Optimize filter/order index combinations
-│   ├── decision_engine.py            Select the next optimization action
-│   ├── detect_slow_queries.py        Find slow query executions
-│   ├── generate_data.py              Generate sample database data
-│   ├── index_recommender.py          Recommend single-column indexes
-│   ├── learning_engine.py            Read optimization history and risk signals
-│   ├── monitor_database.py            Execute and record query metrics
-│   ├── optimization_recommender.py   Generate optimization recommendations
-│   ├── query_plan_analyzer.py        Inspect PostgreSQL query plans
-│   ├── safe_optimizer.py             Run guarded optimization actions
-│   ├── validate_index.py             Validate index performance
-│   ├── workload_generator.py         Generate database workloads
-│   └── workload_prediction.py        Predict the next execution time
-├── src/                              Application packages
-│   ├── config/                       Configuration package
-│   ├── database/                     Database integration package
-│   ├── ml/                           Machine learning package
-│   ├── monitoring/                   Monitoring package
-│   └── main.py                       End-to-end orchestration entry point
-├── tests/                            Automated tests (currently empty)
-├── requirements.txt                  Python dependencies
-├── README.md                         Project documentation
-└── LICENSE                           Project license
-```
+See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for the complete repository
+inventory, including empty directories and all tracked files.
+
+The main areas are:
+
+- `database/` — Database query and schema directories, currently empty
+- `psql queries/` — Example SQL workloads
+- `scripts/` — Database analysis and optimization tools
+- `src/` — Application packages and orchestration entry point
+- `tests/` — Test package
 
 ## Current workflow
 
