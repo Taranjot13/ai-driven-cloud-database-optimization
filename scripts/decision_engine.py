@@ -14,7 +14,7 @@ DB_CONFIG = {
     "port": 5432,
     "database": "cloud_optimizer",
     "user": "postgres",
-    "password": "123456t"  # Replace with your actual PostgreSQL password   
+    "password": "123456t"
 }
 
 
@@ -149,13 +149,15 @@ def extract_query_target(query_text):
     )
 
     column_match = re.search(
-        r"WHERE\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=",
+        r"WHERE\s+(?:(?:[a-zA-Z_][a-zA-Z0-9_]*)\.)?"
+        r"([a-zA-Z_][a-zA-Z0-9_]*)\s*=",
         query_text,
         re.IGNORECASE
     )
 
     order_match = re.search(
-        r"ORDER\s+BY\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+(ASC|DESC))?",
+        r"ORDER\s+BY\s+(?:(?:[a-zA-Z_][a-zA-Z0-9_]*)\.)?"
+        r"([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+(ASC|DESC))?",
         query_text,
         re.IGNORECASE
     )
@@ -610,8 +612,8 @@ def make_decision(
         )
 
         print(
-            "Optimization blocked until resource "
-            "health improves."
+            "Optimization blocked until resource"
+            " health improves."
         )
 
     elif cost_status == "HIGH_COST_RISK":
