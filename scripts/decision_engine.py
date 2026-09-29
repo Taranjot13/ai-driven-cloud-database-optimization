@@ -4,34 +4,20 @@ import pandas as pd
 from sqlalchemy import create_engine
 from sklearn.ensemble import IsolationForest
 
+from scripts.db_config import DB_CONFIG, get_database_url
+
 from scripts.query_plan_analyzer import analyze_query_plan
 from scripts.resource_optimizer import run_resource_optimization
 from scripts.cost_optimizer import run_cost_optimization
 
 
-DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "database": "cloud_optimizer",
-    "user": "postgres",
-    "password": "123456t"
-}
 
 
 SLOW_QUERY_THRESHOLD_MS = 5.0
 
 
 def get_engine():
-    database_url = (
-        f"postgresql+psycopg2://"
-        f"{DB_CONFIG['user']}:"
-        f"{DB_CONFIG['password']}@"
-        f"{DB_CONFIG['host']}:"
-        f"{DB_CONFIG['port']}/"
-        f"{DB_CONFIG['database']}"
-    )
-
-    return create_engine(database_url)
+    return create_engine(get_database_url())
 
 
 def load_metrics():

@@ -1,0 +1,8 @@
+Faker>=30
+matplotlib>=3.9
+pandas>=2.2
+psycopg2-binary>=2.9
+pytest>=8
+python-dotenv>=1
+scikit-learn>=1.5
+SQLAlchemy>=2

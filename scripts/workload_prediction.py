@@ -3,25 +3,7 @@ import pandas as pd
 from sqlalchemy import create_engine
 from sklearn.ensemble import RandomForestRegressor
 
-
-DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "database": "cloud_optimizer",
-    "user": "postgres",
-    "password": "123456t"
-}
-
-
-def get_database_url():
-    return (
-        f"postgresql+psycopg2://"
-        f"{DB_CONFIG['user']}:"
-        f"{DB_CONFIG['password']}@"
-        f"{DB_CONFIG['host']}:"
-        f"{DB_CONFIG['port']}/"
-        f"{DB_CONFIG['database']}"
-    )
+from scripts.db_config import get_database_url
 
 
 def load_metrics():

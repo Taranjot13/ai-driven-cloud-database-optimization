@@ -1,14 +1,9 @@
 import psycopg2
 from datetime import datetime
 
+from scripts.db_config import DB_CONFIG
 
-DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "database": "cloud_optimizer",
-    "user": "postgres",
-    "password": "123456t"  # Replace with your actual PostgreSQL password   
-}
+
 
 
 # Resource health thresholds

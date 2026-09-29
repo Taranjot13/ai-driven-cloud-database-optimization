@@ -4,18 +4,12 @@ from datetime import datetime, timedelta
 from faker import Faker
 import psycopg2
 
+from scripts.db_config import DB_CONFIG
+
 
 # -----------------------------
 # Configuration
 # -----------------------------
-DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "database": "cloud_optimizer",
-    "user": "postgres",
-    "password": "123456t", 
-    # YOUR_POSTGRES_PASSWORD ^^
-}
 
 CUSTOMERS = 10_000
 PRODUCTS = 5_000

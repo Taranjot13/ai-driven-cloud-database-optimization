@@ -123,7 +123,7 @@ inventory, including empty directories and all tracked files.
 
 The main areas are:
 
-- `database/` — Database query and schema directories, currently empty
+- `database/` — PostgreSQL bootstrap schema and query directories
 - `psql queries/` — Example SQL workloads
 - `scripts/` — Database analysis and optimization tools
 - `src/` — Application packages and orchestration entry point
@@ -140,7 +140,7 @@ The main areas are:
 - A PostgreSQL database named `cloud_optimizer`
 - Tables named `query_performance` and `optimization_history`
 
-The application currently reads PostgreSQL connection settings from the `DB_CONFIG` dictionaries in the database-related scripts. Update those values for your local database before running the system. Do not commit real credentials to the repository.
+Database settings are loaded from a local `.env` file. Copy `.env.example` to `.env` and update `DB_PASSWORD` for your PostgreSQL installation. The `.env` file is ignored by Git; never commit real credentials.
 
 ## Installation
 
@@ -148,13 +148,40 @@ The application currently reads PostgreSQL connection settings from the `DB_CONF
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install pandas psycopg2-binary scikit-learn SQLAlchemy
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
 ## Run the optimizer
 
 ```powershell
 python -m src.main
+```
+
+The autonomous optimization stages require at least 10 rows in `query_performance`.
+Edit `.env` with your PostgreSQL connection settings. The database and required tables (`query_performance` and `optimization_history`) must exist before running the optimizer.
+
+## Prepare a local demo database
+
+Create the database once, then initialize its tables from the repository root:
+
+```powershell
+psql -U postgres -c "CREATE DATABASE cloud_optimizer;"
+psql -U postgres -d cloud_optimizer -f database/schema/init.sql
+```
+
+To populate the commerce tables with synthetic workload data, run:
+
+```powershell
+python -m scripts.generate_data
+```
+
+The generator creates 265,000 rows across customers, products, orders, order items, and payments. It can take time to complete. Use a disposable development database because the optimizer can create and remove indexes.
+
+## Run tests
+
+```powershell
+python -m pytest -q
 ```
 
 The autonomous optimization stages require at least 10 rows in `query_performance`.

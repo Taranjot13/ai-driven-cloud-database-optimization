@@ -1,12 +1,7 @@
 import psycopg2
 
-DB_CONFIG = {
-    "host": "localhost",
-    "port": 5432,
-    "database": "cloud_optimizer",
-    "user": "postgres",
-    "password": "123456t"
-}
+from scripts.db_config import DB_CONFIG
+
 
 
 def analyze_query(query, parameters):
