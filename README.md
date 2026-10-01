@@ -1,198 +1,186 @@
-# AI-Driven Autonomous Cloud Database Optimization System
+﻿# AI-Driven Autonomous Cloud Database Optimization System
 
-An intelligent database optimization system for monitoring, analyzing, predicting, and autonomously improving database performance, resource utilization, and infrastructure efficiency.
+This project is a cloud-agnostic PostgreSQL monitoring and optimization platform that observes database behavior, identifies slow-query patterns, analyzes execution plans, detects anomalies, predicts future latency, and applies safe index recommendations when the system decides the risk is acceptable.
 
-## 🚀 Project Overview
+The implemented system follows the loop:
 
-Modern cloud and enterprise databases experience continuously changing workloads that can result in slow queries, inefficient resource utilization, performance degradation, and increased infrastructure costs.
+Observe → Analyze → Predict → Decide → Act → Verify → Learn
 
-This project aims to develop an intelligent database optimization system that continuously observes database workloads and performance metrics, identifies optimization opportunities, predicts workload behavior, and safely recommends or executes optimization actions.
+It is designed for demonstration and research use in a local development database and intentionally avoids direct cloud-provider assumptions. The project exposes a FastAPI backend and a Vite + React dashboard so the optimization workflow is understandable in a professional observability interface.
 
-The system follows an autonomous optimization feedback loop:
+## Implemented capabilities
 
-**Monitor → Analyze → Predict → Decide → Optimize → Verify → Learn**
+- PostgreSQL performance collection and monitoring
+- Slow-query detection and workload review
+- Query execution analysis and target extraction
+- Isolation Forest anomaly detection
+- Workload prediction based on historical latency data
+- Autonomous decision-making around index optimization and safety constraints
+- Optimization history tracking and learning-risk evaluation
+- Resource health and cost analysis using a cloud-agnostic reference model
+- FastAPI read-only monitoring endpoints and explicit optimization execution routes
+- Responsive React dashboard with charts, summary cards, and operational pages
 
-The long-term objective is to enable the system to make optimization decisions while maintaining predefined performance and safety constraints.
+## What is not claimed
 
-## 🎯 Core Objective
+The project does not claim to provide production AWS, Azure, or GCP deployment, cloud auto-scaling, Prometheus/Grafana-managed monitoring, or Docker-based production infrastructure. Those are possible future extensions, but they are not part of the implemented stack in this repository.
 
-The primary objective of this project is to develop an intelligent and eventually autonomous database optimization framework capable of:
+## Tech stack
 
-* Monitoring database performance and workload behavior
-* Detecting abnormal performance patterns
-* Analyzing SQL query execution performance
-* Predicting future workload behavior
-* Identifying database optimization opportunities
-* Recommending appropriate optimization actions
-* Estimating the potential impact of optimization actions
-* Safely executing selected optimizations
-* Verifying the effectiveness of applied changes
-* Rolling back changes that negatively affect performance
-* Learning from historical optimization outcomes
+- Python
+- PostgreSQL
+- SQLAlchemy
+- Pandas
+- Scikit-learn
+- FastAPI
+- React
+- Vite
+- Recharts
+- Pytest
 
-## 🧠 Key Technologies
+## Repository layout
 
-* **Python** — Core development and automation
-* **PostgreSQL** — Database platform and performance experimentation
-* **Pandas & NumPy** — Data processing and analysis
-* **Scikit-learn** — Machine learning and anomaly detection
-* **XGBoost** — Workload prediction and advanced ML models
-* **FastAPI** — Backend API layer
-* **Prometheus** — Metrics collection
-* **Grafana** — Monitoring and visualization
-* **Docker** — Containerization
-* **React** — Web-based monitoring dashboard
-* **GitHub Actions** — CI/CD and automated testing
+- `database/` — PostgreSQL schema bootstrap and example workload assets
+- `scripts/` — core database monitoring, optimization, prediction, cost, and safety logic
+- `src/` — application configuration and FastAPI API layer
+- `tests/` — unit and API test coverage
+- `frontend/` — Vite + React dashboard
+- `docs/` — architecture, API references, experiment results, and generated charts
+- `psql queries/` — SQL workload examples
+- `start-local.ps1` — single-command local launcher for API + frontend
 
-The architecture is designed to remain **cloud-agnostic** and can be adapted to different cloud database and infrastructure environments.
+## Local setup
 
-## 🏗️ Major Components
-
-### 1. Database Monitoring
-
-Collects database performance and workload metrics such as query execution time, returned rows, and workload activity.
-
-### 2. SQL Query Performance Analysis
-
-Analyzes SQL queries and their execution plans to identify inefficient query patterns.
-
-### 3. Workload Prediction
-
-Uses historical workload data to predict future database activity and potential performance requirements.
-
-### 4. Anomaly Detection
-
-Uses machine learning techniques to identify unusual database performance behavior.
-
-### 5. Index Optimization
-
-Identifies queries that may benefit from indexes and evaluates the performance impact of recommended indexes.
-
-### 6. Query Optimization
-
-Analyzes inefficient queries and identifies opportunities for improving query execution performance.
-
-### 7. Cloud Resource Optimization
-
-Analyzes resource utilization and recommends appropriate resource allocation or scaling decisions.
-
-### 8. Cost Optimization
-
-Estimates the infrastructure cost impact of different resource configurations and optimization decisions.
-
-### 9. Autonomous Decision Engine
-
-Acts as the decision-making layer that evaluates monitoring information, ML predictions, optimization recommendations, and system constraints to determine appropriate actions.
-
-### 10. Safety and Rollback Mechanism
-
-Validates optimization results before permanently applying changes and provides a mechanism for reverting ineffective or unsafe optimizations.
-
-## 🔄 Autonomous Optimization Architecture
-
-The intended optimization workflow is:
-
-**Observe → Analyze → Predict → Plan → Act → Verify → Learn**
-
-Where:
-
-* **Observe** — Collect database and workload metrics
-* **Analyze** — Identify performance problems
-* **Predict** — Forecast workload and performance behavior
-* **Plan** — Select an appropriate optimization strategy
-* **Act** — Execute a safe optimization
-* **Verify** — Measure the effect of the change
-* **Learn** — Store the result for future optimization decisions
-
-This architecture allows the project to evolve from ML-assisted automation into a more autonomous, agent-based optimization system.
-
-## 📊 Evaluation Metrics
-
-The system will be evaluated using quantitative performance and efficiency metrics, including:
-
-* Query latency
-* P95/P99 latency
-# AI-Driven Cloud Database Optimization
-
-A Python and PostgreSQL prototype that measures query performance, detects anomalous workload behavior, predicts the next execution time, and selects database index optimizations through an autonomous decision loop.
-
-## Project Structure
-
-See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for the complete repository
-inventory, including empty directories and all tracked files.
-
-The main areas are:
-
-- `database/` — PostgreSQL bootstrap schema and query directories
-- `psql queries/` — Example SQL workloads
-- `scripts/` — Database analysis and optimization tools
-- `src/` — Application packages and orchestration entry point
-- `tests/` — Test package
-
-## Current workflow
-
-**Monitor -> Analyze -> Predict -> Decide -> Optimize -> Verify -> Learn**
-
-## Requirements
-
-- Python 3.10 or later
-- PostgreSQL 13 or later
-- A PostgreSQL database named `cloud_optimizer`
-- Tables named `query_performance` and `optimization_history`
-
-Database settings are loaded from a local `.env` file. Copy `.env.example` to `.env` and update `DB_PASSWORD` for your PostgreSQL installation. The `.env` file is ignored by Git; never commit real credentials.
-
-## Installation
+### 1. Create the Python environment
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+```
+
+### 2. Configure environment variables
+
+Copy the example file and update credentials for your PostgreSQL instance:
+
+```powershell
 Copy-Item .env.example .env
 ```
 
-## Run the optimizer
+The default values are:
 
-```powershell
-python -m src.main
-```
+- `DB_HOST=localhost`
+- `DB_PORT=5432`
+- `DB_NAME=cloud_optimizer`
+- `DB_USER=postgres`
+- `DB_PASSWORD=change_me`
+- `API_HOST=127.0.0.1`
+- `API_PORT=8000`
+- `FRONTEND_ORIGINS=http://localhost:5173,http://127.0.0.1:5173`
 
-The autonomous optimization stages require at least 10 rows in `query_performance`.
-Edit `.env` with your PostgreSQL connection settings. The database and required tables (`query_performance` and `optimization_history`) must exist before running the optimizer.
+Do not commit `.env` or any real secrets.
 
-## Prepare a local demo database
+### 3. Prepare PostgreSQL
 
-Create the database once, then initialize its tables from the repository root:
+Create the database and initialize schema if needed:
 
 ```powershell
 psql -U postgres -c "CREATE DATABASE cloud_optimizer;"
 psql -U postgres -d cloud_optimizer -f database/schema/init.sql
 ```
 
-To populate the commerce tables with synthetic workload data, run:
+Optionally generate workload data:
 
 ```powershell
 python -m scripts.generate_data
 ```
 
-The generator creates 265,000 rows across customers, products, orders, order items, and payments. It can take time to complete. Use a disposable development database because the optimizer can create and remove indexes.
-
-## Run tests
+### 4. Run the backend API
 
 ```powershell
+.\.venv\Scripts\Activate.ps1
+python -m uvicorn src.api:app --reload --host 127.0.0.1 --port 8000
+```
+
+### 5. Run the full app with one command
+
+From the repository root, run:
+
+```powershell
+./start-local.ps1
+```
+
+This starts the FastAPI backend and the Vite frontend together and opens the site at:
+
+- http://localhost:5173
+
+If you want to run the frontend manually instead, use:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+## Safety model
+
+The optimization workflow is intentionally conservative:
+
+- Monitoring and dashboard views are read-only by default.
+- Optimization execution requires an explicit user action and confirmation.
+- The existing safety and rollback logic is preserved instead of bypassing it.
+- The system does not silently create or drop indexes without review.
+
+## API overview
+
+The backend exposes endpoints for health, dashboard data, performance, anomalies, predictions, optimization history, resources, costs, and system status.
+
+Key routes include:
+
+- `GET /api/health`
+- `GET /api/dashboard`
+- `GET /api/performance`
+- `GET /api/performance/summary`
+- `GET /api/anomalies`
+- `GET /api/predictions`
+- `GET /api/optimization/history`
+- `GET /api/optimization/summary`
+- `GET /api/resources`
+- `GET /api/costs`
+- `GET /api/system/status`
+- `POST /api/optimization/analyze`
+- `POST /api/optimization/execute`
+
+## Testing
+
+The Python test suite can be executed with:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
 python -m pytest -q
 ```
 
-The autonomous optimization stages require at least 10 rows in `query_performance`.
+The frontend production build is verified with:
 
-## Safety notes
+```powershell
+cd frontend
+npm run build
+```
 
-Run the optimizer against a development or staging database first. Review generated index changes and use a database user with only the permissions required for testing. The optimizer can execute schema changes when the decision engine selects an optimization.
+## Documentation
 
-## Project status
+Additional project documentation is available in:
 
-PostgreSQL monitoring, query analysis, workload prediction, autonomous index optimization, and learning signals are implemented. Cloud-provider resource optimization and production configuration management are not yet included.
+- `docs/architecture.md`
+- `docs/api.md`
+- `docs/frontend.md`
+- `docs/experiments.md`
+- `docs/EXPERIMENT_RESULTS.md`
+
+## Future extensions
+
+Potential next steps include richer operator workflows, A/B evaluations, production telemetry integrations, and deeper cloud-agnostic infrastructure modeling. This project is intentionally scoped to a safe research and university-demonstration environment.
 
 ## Author
 

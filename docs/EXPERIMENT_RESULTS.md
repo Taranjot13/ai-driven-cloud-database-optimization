@@ -1,6 +1,8 @@
 # Experiment Results
 
-This document summarizes the current experimental results generated from the PostgreSQL performance and optimization history of the AI-Driven Autonomous Cloud Database Optimization System.
+This document reflects the current PostgreSQL performance and optimization history for the project. The figures are based on the repository's live data and are presented without fabricating additional results.
+
+The metrics below distinguish successful and verified outcomes from neutral index records, unstable experiments, and rollbacks so the system's safety model remains explicit.
 
 ## 1. Performance Dataset
 
